@@ -48,9 +48,8 @@ namespace ParallelSurf
 	{
 		_width = iWidth;
 		_height = iHeight;
-		this->_pixels = new unsigned char*[_height];
-#pragma omp parallel for
-		for (int i = 0; i < (int)_height; i++)
+		_pixels = new unsigned char*[_height];
+		for (unsigned int i = 0; i < _height; i++)
 		{
 			_pixels[i] = new unsigned char[_width];
 		}
@@ -58,12 +57,12 @@ namespace ParallelSurf
 		{
 			cv::cvtColor(_Img, _Img, cv::COLOR_BGR2GRAY);
 		}
-#pragma omp parallel for
-		for (int i = 0; i < (int)_height; i++)
+		for (unsigned int i = 0; i < _height; i++)
 		{
+			const unsigned char* row = _Img.ptr<unsigned char>(i);
 			for (unsigned int j = 0; j < _width; j++)
 			{
-				_pixels[i][j] = _Img.at<unsigned char>(i, j);
+				_pixels[i][j] = row[j];
 			}
 		}
 		_ii = AllocateImage(_width + 1, _height + 1);
@@ -82,10 +81,10 @@ namespace ParallelSurf
 	Image::~Image()
 	{
 		clean();
-#pragma omp parallel for
-		for (int i = 0; i < (int)_height; i++)
+
+		for (unsigned int i = 0; i < _height; i++)
 		{
-			delete[] this->_pixels[i];
+			delete[] _pixels[i];
 		}
 		delete[] _pixels;
 		_pixels = nullptr;
@@ -100,37 +99,12 @@ namespace ParallelSurf
 
 		static const double norm = 1.0 / 255.0;
 
-		int numCPUs = omp_get_num_procs();
-		int maxThreads = omp_get_max_threads();
-
-		if ((numCPUs > 2) && (maxThreads > 2))
+		for (unsigned int i = 1; i <= _height; ++i)
 		{
-#pragma omp parallel for
-			for (int i = 1; i <= (int)_height; ++i)
+			for (unsigned int j = 1; j <= _width; ++j)
 			{
-				for (unsigned int j = 1; j <= _width; ++j)
-				{
-					_ii[i][j] = norm * double(_pixels[i - 1][j - 1]) + _ii[i][j - 1];
-				}
-			}
-#pragma omp parallel for
-			for (int j = 1; j <= (int)_width; ++j)
-			{
-				for (unsigned int i = 1; i <= _height; ++i)
-				{
-					_ii[i][j] += _ii[i - 1][j];
-				}
-			}
-		}
-		else
-		{
-			for (unsigned int i = 1; i <= _height; ++i)
-			{
-				for (unsigned int j = 1; j <= _width; ++j)
-				{
-					_ii[i][j] = norm * double(_pixels[i - 1][j - 1]) +
-						_ii[i - 1][j] + _ii[i][j - 1] - _ii[i - 1][j - 1];
-				}
+				_ii[i][j] = norm * double(_pixels[i - 1][j - 1]) +
+					_ii[i - 1][j] + _ii[i][j - 1] - _ii[i - 1][j - 1];
 			}
 		}
 	}
@@ -193,7 +167,7 @@ namespace cvg
 	const double Surf::kBaseSigma = 1.2;
 
 
-	Surf::Surf(/*Image &img,*/ bool _extended /*= false*/) :_image()
+	Surf::Surf(bool _extended /*= false*/)
 	{
 
 		// initialize default values
@@ -230,13 +204,13 @@ namespace cvg
 
 
 
-	void Surf::compute(std::vector<ParallelSurf::KeyPoint>& _Keypoints)
+	void Surf::compute(ParallelSurf::Image& img, std::vector<ParallelSurf::KeyPoint>& _Keypoints)
 	{
 
 		assert(_Keypoints.size() > 0);
 
 		std::cout << "Computing descriptors..";
-		this->makeDescriptors(_Keypoints.begin(), _Keypoints.end());
+		this->makeDescriptors(img, _Keypoints.begin(), _Keypoints.end());
 		std::cout << "finished." << std::endl;
 
 
@@ -264,7 +238,6 @@ namespace cvg
 		std::vector<ParallelSurf::KeyPoint>& _Keypoints)
 	{
 
-		this->_image = iImage;
 
 		//Keypoint storage
 		//std::vector<ParallelSurf::KeyPoint> keyPoints;
@@ -499,7 +472,7 @@ namespace cvg
 		std::cout << "Found " << _Keypoints.size() << " keypoints." << std::endl;
 
 		//计算特征点方向
-		this->assignOrientations(_Keypoints.begin(), _Keypoints.end());
+		this->assignOrientations(iImage, _Keypoints.begin(), _Keypoints.end());
 
 		// deallocate memory of the scale images
 		for (int s = 0; s < _maxScales; ++s)
@@ -692,7 +665,7 @@ namespace cvg
 
 	}*/
 
-	void Surf::makeDescriptor(ParallelSurf::KeyPoint& ioKeyPoint) const
+	void Surf::makeDescriptor(ParallelSurf::Image& img, ParallelSurf::KeyPoint& ioKeyPoint) const
 	{
 		// create a descriptor context
 		ParallelSurf::KeyPointDescriptorContext aCtx(_subRegions, _vecLen, ioKeyPoint._ori);
@@ -704,7 +677,7 @@ namespace cvg
 		//assignOrientation(ioKeyPoint);
 
 		// create a vector
-		createDescriptor(aCtx, ioKeyPoint);
+		createDescriptor(aCtx, img, ioKeyPoint);
 
 		// transform back to vector
 
@@ -729,7 +702,7 @@ namespace cvg
 
 	}
 
-	void Surf::assignOrientation(ParallelSurf::KeyPoint& ioKeyPoint) const
+	void Surf::assignOrientation(ParallelSurf::Image& img, ParallelSurf::KeyPoint& ioKeyPoint) const
 	{
 		unsigned int aRX = ParallelSurf::Math::Round(ioKeyPoint._x);
 		unsigned int aRY = ParallelSurf::Math::Round(ioKeyPoint._y);
@@ -737,7 +710,7 @@ namespace cvg
 
 		//ParallelSurf::Image img = _image;
 
-		WaveFilter aWaveFilter(2.0 * ioKeyPoint._scale + 1.6, _image);
+		WaveFilter aWaveFilter(2.0 * ioKeyPoint._scale + 1.6, img);
 
 		std::vector< cvg::response > aRespVector;
 		aRespVector.reserve(253);
@@ -833,6 +806,7 @@ namespace cvg
 
 	void Surf::createDescriptor(
 		ParallelSurf::KeyPointDescriptorContext& iCtx,
+		ParallelSurf::Image& img,
 		ParallelSurf::KeyPoint& ioKeyPoint) const
 	{
 		// create the vector of features by analyzing a square patch around the point.
@@ -895,7 +869,7 @@ namespace cvg
 
 					//ParallelSurf::Image img = _image;
 
-					WaveFilter aWaveFilter(aStep,/* img*/ _image);
+					WaveFilter aWaveFilter(aStep,/* img*/ img);
 
 					if (!aWaveFilter.checkBounds(aXSample, aYSample))
 					{

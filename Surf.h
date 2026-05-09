@@ -1,4 +1,4 @@
-﻿
+
 #pragma once
 
 #include <vector>
@@ -52,18 +52,8 @@ namespace cvg
 		//检测特征点
 		void detect(ParallelSurf::Image &_Img, std::vector<ParallelSurf::KeyPoint>& _Keypoints);
 
-		/**
-	 * @brief detect and store keypoints
-	 * @param iImage integral image to use
-	 * @param iInsertor function object used for storing the keypoints
-	 */
-	 //void detectKeyPoints(ParallelSurf::Image& iImage, std::vector<ParallelSurf::KeyPoint>& _Keypoints);
-
-	 //计算特征描述子
-		void compute(std::vector<ParallelSurf::KeyPoint>& _Keypoints);
-
-		// orig image info
-		Image _image;
+		//计算特征描述子
+		void compute(ParallelSurf::Image& img, std::vector<ParallelSurf::KeyPoint>& _Keypoints);
 
 
 	private:
@@ -140,13 +130,14 @@ namespace cvg
 		// do the actual descriptor computation
 		void  createDescriptor(
 			ParallelSurf::KeyPointDescriptorContext& iCtx,
+			ParallelSurf::Image& img,
 			ParallelSurf::KeyPoint& ioKeyPoint) const;
 
 
 	public:
 
 		/// @brief assign orientation to given keypoint
-		void assignOrientation(ParallelSurf::KeyPoint& ioKeyPoint) const;
+		void assignOrientation(ParallelSurf::Image& img, ParallelSurf::KeyPoint& ioKeyPoint) const;
 
 		/**
 		 * @brief assign orientations to given keypoints
@@ -154,10 +145,10 @@ namespace cvg
 		 * @param iEnd iterator to keypoint where to stop computation (first one after the last)
 		 */
 		template< class IteratorT >
-		void assignOrientations(IteratorT iBegin, IteratorT iEnd);
+		void assignOrientations(ParallelSurf::Image& img, IteratorT iBegin, IteratorT iEnd);
 
 		/// @brief compute descriptor for single keypoint
-		void makeDescriptor(ParallelSurf::KeyPoint& ioKeyPoint) const;
+		void makeDescriptor(ParallelSurf::Image& img, ParallelSurf::KeyPoint& ioKeyPoint) const;
 
 		/**
 		* @brief compute descriptors for given keypoints
@@ -165,7 +156,7 @@ namespace cvg
 		* @param iEnd iterator to keypoint where to stop computation (first one after the last)
 		*/
 		template< class IteratorT >
-		void makeDescriptors(IteratorT iBegin, IteratorT iEnd);
+		void makeDescriptors(ParallelSurf::Image& img, IteratorT iBegin, IteratorT iEnd);
 
 		/// @return length of descriptor resulting from current parameters
 		int getDescriptorLength() const;
@@ -191,35 +182,21 @@ namespace cvg
 
 
 template< class IteratorT >
-void cvg::Surf::assignOrientations(IteratorT iBegin, IteratorT iEnd)
+void cvg::Surf::assignOrientations(ParallelSurf::Image& img, IteratorT iBegin, IteratorT iEnd)
 {
-	IteratorT aCurrent;
-#pragma omp parallel private (aCurrent)
+	for (IteratorT aCurrent = iBegin; aCurrent != iEnd; aCurrent++)
 	{
-		for (aCurrent = iBegin; aCurrent != iEnd; aCurrent++)
-		{
-#pragma omp single nowait
-			{
-				assignOrientation(*aCurrent);
-			}
-		}
+		assignOrientation(img, *aCurrent);
 	}
 }
 
 
 
 template< class IteratorT >
-void cvg::Surf::makeDescriptors(IteratorT iBegin, IteratorT iEnd)
+void cvg::Surf::makeDescriptors(ParallelSurf::Image& img, IteratorT iBegin, IteratorT iEnd)
 {
-	IteratorT aCurrent;
-#pragma omp parallel private (aCurrent)
+	for (IteratorT aCurrent = iBegin; aCurrent != iEnd; aCurrent++)
 	{
-		for (aCurrent = iBegin; aCurrent != iEnd; aCurrent++)
-		{
-#pragma omp single nowait
-			{
-				makeDescriptor(*aCurrent);
-			}
-		}
+		makeDescriptor(img, *aCurrent);
 	}
 }

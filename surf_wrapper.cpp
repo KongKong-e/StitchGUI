@@ -68,7 +68,7 @@ void SurfDetector::detectAndCompute(
         return;
     }
 
-    surf.compute(psKps);
+    surf.compute(psImg, psKps);
 
     cv::Mat descMat;
     parallelsurfToCv(psKps, keypoints, descMat);
@@ -125,8 +125,8 @@ void SurfDetector::compute(
     }
 
     // Assign orientations and compute descriptors
-    surf.assignOrientations(psKps.begin(), psKps.end());
-    surf.compute(psKps);
+    surf.assignOrientations(psImg, psKps.begin(), psKps.end());
+    surf.compute(psImg, psKps);
 
     // Convert descriptors to cv::Mat
     int vecLen = psKps[0]._vec.size();
