@@ -33,7 +33,7 @@ namespace ParallelSurf
 	class WaveFilter
 	{
 	public:
-		WaveFilter(double iBaseSize, Image& iImage);
+		WaveFilter(double iBaseSize, const Image& iImage);
 
 		double getWx(unsigned int x, unsigned int y);
 		double getWy(unsigned int x, unsigned int y);
@@ -52,7 +52,7 @@ namespace ParallelSurf
 
 	};
 
-	inline WaveFilter::WaveFilter(double iBaseSize, Image& iImage)
+	inline WaveFilter::WaveFilter(double iBaseSize, const Image& iImage)
 	{
 		_ii = iImage.getIntegralImage();
 		_im_width = iImage.getWidth();

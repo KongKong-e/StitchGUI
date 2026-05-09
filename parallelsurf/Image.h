@@ -81,19 +81,19 @@ namespace ParallelSurf
 		}
 
 
-		inline double ** getIntegralImage()
+		inline double ** getIntegralImage() const
 		{
 			return _ii;
 		}
 
 
-		inline unsigned int	getWidth()
+		inline unsigned int	getWidth() const
 		{
 			return _width;
 		}
 
 
-		inline unsigned int	getHeight()
+		inline unsigned int	getHeight() const
 		{
 			return _height;
 		}

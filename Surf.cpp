@@ -193,7 +193,7 @@ namespace cvg
 	const double Surf::kBaseSigma = 1.2;
 
 
-	Surf::Surf(/*Image &img,*/ bool _extended /*= false*/) :_image(Image())
+	Surf::Surf(/*Image &img,*/ bool _extended /*= false*/) :_image()
 	{
 
 		// initialize default values

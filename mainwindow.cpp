@@ -438,12 +438,6 @@ MainWindow::MainWindow(QWidget *parent)
         ui->label_4->setVisible(showLG);
         ui->lineEdit_lightGlueModel->setVisible(showLG);
         ui->pushButton_browseLightGlue->setVisible(showLG);
-
-        // 经典匹配器自动切换默认阈值（Lowe's ratio test 推荐 0.6）
-        bool isLightGlue = (ui->comboBox_matcher->currentIndex() == 0);
-        if (!isLightGlue && ui->doubleSpinBox_matchThreshold->value() == 0.2) {
-            ui->doubleSpinBox_matchThreshold->setValue(0.6);
-        }
     };
     connect(ui->comboBox_detector, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
     connect(ui->comboBox_matcher, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
@@ -483,7 +477,7 @@ void MainWindow::on_browseImageDir_clicked()
         appendLog("选择图像文件夹: " + dir);
 
         // 默认将输出文件夹设置为图像文件夹下的 superstitch 目录
-        QString defaultOutputDir = dir + "/superstitch";
+        QString defaultOutputDir = dir + "/stitchGUI";
         ui->lineEdit_outputDir->setText(defaultOutputDir);
     }
 }
@@ -653,8 +647,8 @@ void MainWindow::on_exit_triggered()
 
 void MainWindow::on_about_triggered()
 {
-    QMessageBox::about(this, "关于 SuperStitch",
-        "SuperStitch - 图像拼接工具\n\n"
+    QMessageBox::about(this, "关于 StitchGUI",
+        "StitchGUI - 图像拼接工具\n\n"
         "支持特征检测器: SuperPoint, SIFT, ORB, SURF\n"
         "支持匹配器: LightGlue, BFMatcher\n"
         "版本: 1.1\n\n"
@@ -681,7 +675,7 @@ void MainWindow::on_operationGuide_triggered()
     );
 
     docViewer->setHtml(
-        "<h2 style='color:#1f2937;margin-bottom:8px;'>SuperStitch 操作指南</h2>"
+        "<h2 style='color:#1f2937;margin-bottom:8px;'>StitchGUI 操作指南</h2>"
         "<p style='color:#4b5563;'>本指南用于帮助新手快速完成首次拼接任务。</p>"
         "<h3 style='color:#2563eb;'>一、准备阶段</h3>"
         "<ol>"

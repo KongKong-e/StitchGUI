@@ -63,7 +63,7 @@ namespace cvg
 		void compute(std::vector<ParallelSurf::KeyPoint>& _Keypoints);
 
 		// orig image info
-		Image &_image;
+		Image _image;
 
 
 	private:
