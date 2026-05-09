@@ -42,3 +42,11 @@ model/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ========== Claude Code ==========
+.claude/
+
+# ========== Qt Creator 杂项 ==========
+*.autosave
+*.qmlc
+*.jsc

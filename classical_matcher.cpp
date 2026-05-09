@@ -1,0 +1,195 @@
+#include "classical_matcher.h"
+
+ClassicalMatcher::ClassicalMatcher(cv::Stitcher::Mode mode, float matchThresh)
+    : FeaturesMatcher(false)
+    , m_mode(mode)
+    , m_matchThresh(matchThresh)
+{
+}
+
+void ClassicalMatcher::match(
+    const cv::detail::ImageFeatures& features1,
+    const cv::detail::ImageFeatures& features2,
+    cv::detail::MatchesInfo& matches_info)
+{
+    matches_info.src_img_idx = features1.img_idx;
+    matches_info.dst_img_idx = features2.img_idx;
+    matches_info.H = cv::Mat();
+    matches_info.confidence = 0;
+    matches_info.num_inliers = 0;
+
+    if (features1.keypoints.empty() || features2.keypoints.empty())
+        return;
+
+    // KNN 匹配 (k=2)，用于 Lowe's ratio test
+    std::vector<std::vector<cv::DMatch>> knnMatches;
+
+    if (features1.descriptors.depth() == CV_8U)
+    {
+        // ORB 等 binary 描述子：BFMatcher + 汉明距离
+        cv::BFMatcher matcher(cv::NORM_HAMMING);
+        matcher.knnMatch(features1.descriptors, features2.descriptors, knnMatches, 2);
+    }
+    else
+    {
+        // SIFT/SuperPoint 等 float 描述子：FLANN KD-Tree
+        cv::FlannBasedMatcher matcher;
+        matcher.knnMatch(features1.descriptors, features2.descriptors, knnMatches, 2);
+    }
+
+    // Lowe's ratio test 筛选
+    for (size_t i = 0; i < knnMatches.size(); i++)
+    {
+        if (knnMatches[i].size() == 2 &&
+            knnMatches[i][0].distance < (1.f - m_matchThresh) * knnMatches[i][1].distance)
+        {
+            matches_info.matches.push_back(knnMatches[i][0]);
+        }
+    }
+
+    if (matches_info.matches.size() < 6)
+        return;
+
+    // 估计几何变换（坐标需以图像中心为原点，同 LightGlue 做法）
+    cv::Mat src_points(1, static_cast<int>(matches_info.matches.size()), CV_32FC2);
+    cv::Mat dst_points(1, static_cast<int>(matches_info.matches.size()), CV_32FC2);
+
+    if (m_mode == cv::Stitcher::SCANS)
+    {
+        for (size_t i = 0; i < matches_info.matches.size(); ++i)
+        {
+            src_points.at<cv::Point2f>(0, static_cast<int>(i)) =
+                features1.keypoints[matches_info.matches[i].queryIdx].pt;
+            dst_points.at<cv::Point2f>(0, static_cast<int>(i)) =
+                features2.keypoints[matches_info.matches[i].trainIdx].pt;
+        }
+
+        matches_info.H = cv::estimateAffine2D(src_points, dst_points, matches_info.inliers_mask);
+
+        if (matches_info.H.empty())
+        {
+            matches_info.confidence = 0;
+            matches_info.num_inliers = 0;
+            return;
+        }
+
+        matches_info.num_inliers = 0;
+        for (size_t i = 0; i < matches_info.inliers_mask.size(); ++i)
+        {
+            if (matches_info.inliers_mask[i])
+                matches_info.num_inliers++;
+        }
+
+        matches_info.confidence =
+            matches_info.num_inliers / (8 + 0.3 * matches_info.matches.size());
+
+        matches_info.H.push_back(cv::Mat::zeros(1, 3, CV_64F));
+        matches_info.H.at<double>(2, 2) = 1;
+    }
+    else if (m_mode == cv::Stitcher::PANORAMA)
+    {
+        for (size_t i = 0; i < matches_info.matches.size(); ++i)
+        {
+            const cv::DMatch& m = matches_info.matches[i];
+
+            cv::Point2f p = features1.keypoints[m.queryIdx].pt;
+            p.x -= features1.img_size.width * 0.5f;
+            p.y -= features1.img_size.height * 0.5f;
+            src_points.at<cv::Point2f>(0, static_cast<int>(i)) = p;
+
+            p = features2.keypoints[m.trainIdx].pt;
+            p.x -= features2.img_size.width * 0.5f;
+            p.y -= features2.img_size.height * 0.5f;
+            dst_points.at<cv::Point2f>(0, static_cast<int>(i)) = p;
+        }
+
+        matches_info.H = cv::findHomography(src_points, dst_points, matches_info.inliers_mask, cv::RANSAC);
+        if (matches_info.H.empty() || std::abs(cv::determinant(matches_info.H)) < std::numeric_limits<double>::epsilon())
+            return;
+
+        matches_info.num_inliers = 0;
+        for (size_t i = 0; i < matches_info.inliers_mask.size(); ++i)
+        {
+            if (matches_info.inliers_mask[i])
+                matches_info.num_inliers++;
+        }
+
+        matches_info.confidence = matches_info.num_inliers / (8 + 0.3 * matches_info.matches.size());
+        matches_info.confidence = matches_info.confidence > 3. ? 0. : matches_info.confidence;
+
+        if (matches_info.num_inliers < 6)
+            return;
+
+        // 二次 RANSAC 精炼（仅用内点重估）
+        src_points.create(1, matches_info.num_inliers, CV_32FC2);
+        dst_points.create(1, matches_info.num_inliers, CV_32FC2);
+        int inlier_idx = 0;
+        for (size_t i = 0; i < matches_info.matches.size(); ++i)
+        {
+            if (!matches_info.inliers_mask[i])
+                continue;
+
+            const cv::DMatch& m = matches_info.matches[i];
+
+            cv::Point2f p = features1.keypoints[m.queryIdx].pt;
+            p.x -= features1.img_size.width * 0.5f;
+            p.y -= features1.img_size.height * 0.5f;
+            src_points.at<cv::Point2f>(0, inlier_idx) = p;
+
+            p = features2.keypoints[m.trainIdx].pt;
+            p.x -= features2.img_size.width * 0.5f;
+            p.y -= features2.img_size.height * 0.5f;
+            dst_points.at<cv::Point2f>(0, inlier_idx) = p;
+
+            inlier_idx++;
+        }
+
+        matches_info.H = cv::findHomography(src_points, dst_points, cv::RANSAC);
+    }
+
+    // 缓存数据用于可视化
+    this->AddFeature(features1);
+    this->AddFeature(features2);
+    this->AddMatcheinfo(matches_info);
+}
+
+void ClassicalMatcher::AddFeature(cv::detail::ImageFeatures features)
+{
+    bool found = false;
+    for (size_t i = 0; i < this->features_.size(); i++)
+    {
+        if (features.img_idx == this->features_[i].img_idx)
+        {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        this->features_.push_back(features);
+}
+
+void ClassicalMatcher::AddMatcheinfo(const cv::detail::MatchesInfo& matches)
+{
+    bool found = false;
+
+    for (size_t i = 0; i < this->pairwise_matches_.size(); i++)
+    {
+        if (matches.src_img_idx == this->pairwise_matches_[i].src_img_idx &&
+            matches.dst_img_idx == this->pairwise_matches_[i].dst_img_idx)
+        {
+            found = true;
+            break;
+        }
+
+        if (matches.src_img_idx == this->pairwise_matches_[i].dst_img_idx &&
+            matches.dst_img_idx == this->pairwise_matches_[i].src_img_idx)
+        {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+        this->pairwise_matches_.push_back(cv::detail::MatchesInfo(matches));
+}

@@ -7,6 +7,8 @@
 #include <opencv2/opencv.hpp>
 #include "superpoint.h"
 #include "lightglue.h"
+#include "classical_matcher.h"
+#include "surf_wrapper.h"
 #include "utils.h"
 #include "file_utils.h"
 
@@ -36,7 +38,9 @@ public:
         float confidenceThreshold,
         const std::string& outputDir,
         const std::string& outputName,
-        bool saveMatching);
+        bool saveMatching,
+        const std::string& detector,
+        const std::string& matcher);
 
 public slots:
     void process();
@@ -60,8 +64,13 @@ private:
     std::string m_outputDir;
     std::string m_outputName;
     bool m_saveMatching;
+    std::string m_detector;
+    std::string m_matcher;
     bool m_stopRequested;
     QMutex m_mutex;
+
+    cv::Ptr<cv::Feature2D> createDetector();
+    cv::Ptr<cv::detail::FeaturesMatcher> createMatcher();
 };
 
 class MainWindow : public QMainWindow

@@ -14,6 +14,7 @@
 #include <QTextBrowser>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QStandardItemModel>
 
 StitchingWorker::StitchingWorker(QObject* parent)
     : QObject(parent)
@@ -37,7 +38,9 @@ void StitchingWorker::setParameters(
     float confidenceThreshold,
     const std::string& outputDir,
     const std::string& outputName,
-    bool saveMatching)
+    bool saveMatching,
+    const std::string& detector,
+    const std::string& matcher)
 {
     QMutexLocker locker(&m_mutex);
     m_imageDir = imageDir;
@@ -51,6 +54,8 @@ void StitchingWorker::setParameters(
     m_outputDir = outputDir;
     m_outputName = outputName;
     m_saveMatching = saveMatching;
+    m_detector = detector;
+    m_matcher = matcher;
     m_stopRequested = false;
 }
 
@@ -58,6 +63,27 @@ void StitchingWorker::requestStop()
 {
     QMutexLocker locker(&m_mutex);
     m_stopRequested = true;
+}
+
+cv::Ptr<cv::Feature2D> StitchingWorker::createDetector()
+{
+    if (m_detector == "superpoint")
+        return cv::makePtr<SuperPoint>(m_superPointPath);
+    else if (m_detector == "sift")
+        return cv::SIFT::create();
+    else if (m_detector == "orb")
+        return cv::ORB::create();
+    else if (m_detector == "surf")
+        return cv::makePtr<SurfDetector>();
+    throw std::runtime_error("不支持的检测器: " + m_detector);
+}
+
+cv::Ptr<cv::detail::FeaturesMatcher> StitchingWorker::createMatcher()
+{
+    if (m_matcher == "lightglue")
+        return cv::makePtr<LightGlue>(m_lightGluePath, m_mode, m_matchThreshold);
+    else
+        return cv::makePtr<ClassicalMatcher>(m_mode, m_matchThreshold);
 }
 
 void StitchingWorker::process()
@@ -88,11 +114,11 @@ void StitchingWorker::process()
             }
         }
 
-        emit logMessage("正在初始化SuperPoint模型...");
-        cv::Ptr<SuperPoint> superPoint = cv::makePtr<SuperPoint>(m_superPointPath);
+        emit logMessage("正在初始化特征检测器: " + QString::fromStdString(m_detector) + "...");
+        cv::Ptr<cv::Feature2D> detector = createDetector();
 
-        emit logMessage("正在初始化LightGlue模型...");
-        cv::Ptr<LightGlue> lightGlue = cv::makePtr<LightGlue>(m_lightGluePath, m_mode, m_matchThreshold);
+        emit logMessage("正在初始化匹配器: " + QString::fromStdString(m_matcher) + "...");
+        cv::Ptr<cv::detail::FeaturesMatcher> matcher = createMatcher();
 
         emit progressChanged(50);
 
@@ -108,8 +134,8 @@ void StitchingWorker::process()
         emit logMessage("正在创建拼接器...");
         cv::Ptr<cv::Stitcher> stitcher = cv::Stitcher::create(m_mode);
         stitcher->setPanoConfidenceThresh(m_confidenceThreshold);
-        stitcher->setFeaturesFinder(superPoint);
-        stitcher->setFeaturesMatcher(lightGlue);
+        stitcher->setFeaturesFinder(detector);
+        stitcher->setFeaturesMatcher(matcher);
 
         emit logMessage("正在执行...");
         cv::Mat pano;
@@ -135,16 +161,31 @@ void StitchingWorker::process()
 
             if (m_saveMatching) {
                 emit logMessage("正在保存匹配结果...");
-                std::vector<cv::detail::ImageFeatures> features = lightGlue->features();
-                std::vector<cv::detail::MatchesInfo> matches = lightGlue->matchinfo();
 
-                for (int i = 0; i < matches.size(); i++) {
+                std::vector<cv::detail::ImageFeatures> features;
+                std::vector<cv::detail::MatchesInfo> matches;
+
+                if (m_matcher == "lightglue") {
+                    LightGlue* lg = dynamic_cast<LightGlue*>(matcher.get());
+                    if (lg) {
+                        features = lg->features();
+                        matches = lg->matchinfo();
+                    }
+                } else {
+                    ClassicalMatcher* cm = dynamic_cast<ClassicalMatcher*>(matcher.get());
+                    if (cm) {
+                        features = cm->features();
+                        matches = cm->matchinfo();
+                    }
+                }
+
+                for (size_t i = 0; i < matches.size(); i++) {
                     cv::Mat srcImg = imgs[matches[i].src_img_idx];
                     cv::Mat dstImg = imgs[matches[i].dst_img_idx];
 
                     cv::detail::ImageFeatures srcFeature;
                     cv::detail::ImageFeatures dstFeature;
-                    for (int j = 0; j < features.size(); j++) {
+                    for (size_t j = 0; j < features.size(); j++) {
                         if (features[j].img_idx == matches[i].src_img_idx) {
                             srcFeature = features[j];
                         }
@@ -361,12 +402,53 @@ MainWindow::MainWindow(QWidget *parent)
     connect(operationGuideAction, &QAction::triggered, this, &MainWindow::on_operationGuide_triggered);
     
     // 预设模型路径
-    QString superPointPath = "D:/黄景溪/桌面文件/大创/项目代码和数据/SuperStitch/SuperStitch/model/superpoint.onnx";
-    QString lightGluePath = "D:/黄景溪/桌面文件/大创/项目代码和数据/SuperStitch/SuperStitch/model/superpoint_lightglue.onnx";
+    QString superPointPath = "D:/code/Qt/StitchGUI-github/model/superpoint.onnx";
+    QString lightGluePath = "D:/code/Qt/StitchGUI-github/model/superpoint_lightglue.onnx";
     ui->lineEdit_superPointModel->setText(superPointPath);
     ui->lineEdit_lightGlueModel->setText(lightGluePath);
     
     initializeConnections();
+
+    // 检测器/匹配器联动逻辑
+    auto updateAlgoVisibility = [this]() {
+        int detIdx = ui->comboBox_detector->currentIndex();
+        bool isSuperPoint = (detIdx == 0);
+
+        // 非 SuperPoint 时，LightGlue 不可用，自动切到 BFMatcher
+        if (!isSuperPoint && ui->comboBox_matcher->currentIndex() == 0) {
+            ui->comboBox_matcher->blockSignals(true);
+            ui->comboBox_matcher->setCurrentIndex(1);
+            ui->comboBox_matcher->blockSignals(false);
+        }
+
+        // 灰化 LightGlue 选项（非 SuperPoint 时不可选）
+        QStandardItemModel* model = qobject_cast<QStandardItemModel*>(
+            ui->comboBox_matcher->model());
+        if (model) {
+            model->item(0)->setEnabled(isSuperPoint);
+        }
+
+        // 模型路径显隐：SuperPoint 检测器 → 显示模型路径
+        ui->label_3->setVisible(isSuperPoint);
+        ui->lineEdit_superPointModel->setVisible(isSuperPoint);
+        ui->pushButton_browseSuperPoint->setVisible(isSuperPoint);
+
+        // LightGlue 模型路径：SuperPoint 且选了 LightGlue 时才显示
+        bool showLG = isSuperPoint && (ui->comboBox_matcher->currentIndex() == 0);
+        ui->label_4->setVisible(showLG);
+        ui->lineEdit_lightGlueModel->setVisible(showLG);
+        ui->pushButton_browseLightGlue->setVisible(showLG);
+
+        // 经典匹配器自动切换默认阈值（Lowe's ratio test 推荐 0.6）
+        bool isLightGlue = (ui->comboBox_matcher->currentIndex() == 0);
+        if (!isLightGlue && ui->doubleSpinBox_matchThreshold->value() == 0.2) {
+            ui->doubleSpinBox_matchThreshold->setValue(0.6);
+        }
+    };
+    connect(ui->comboBox_detector, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
+    connect(ui->comboBox_matcher, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
+    updateAlgoVisibility();
+
     appendLog("SuperStitch GUI 已启动");
 }
 
@@ -462,6 +544,12 @@ void MainWindow::on_startStitching_clicked()
     std::string outputName = ui->lineEdit_outputName->text().toStdString();
     bool saveMatching = ui->checkBox_showMatching->isChecked();
 
+    // 检测器和匹配器选择
+    static const QStringList detectors = {"superpoint", "sift", "orb", "surf"};
+    static const QStringList matchers = {"lightglue", "bfmatcher"};
+    std::string detector = detectors[ui->comboBox_detector->currentIndex()].toStdString();
+    std::string matcher = matchers[ui->comboBox_matcher->currentIndex()].toStdString();
+
     const QString inputDir = ui->lineEdit_imageDir->text();
     const QString inputFolderName = QFileInfo(inputDir).fileName();
     const QString runId = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
@@ -475,7 +563,8 @@ void MainWindow::on_startStitching_clicked()
         imageDir, extension, divideImages,
         superPointPath, lightGluePath, mode,
         matchThreshold, confidenceThreshold,
-        outputDir, outputName, saveMatching);
+        outputDir, outputName, saveMatching,
+        detector, matcher);
 
     m_worker->moveToThread(m_workerThread);
 
@@ -565,10 +654,11 @@ void MainWindow::on_exit_triggered()
 void MainWindow::on_about_triggered()
 {
     QMessageBox::about(this, "关于 SuperStitch",
-        "SuperStitch - 工具\n\n"
-        "基于SuperPoint和LightGlue的系统\n"
-        "版本: 1.0\n\n"
-        "使用Qt 6.5.3开发");
+        "SuperStitch - 图像拼接工具\n\n"
+        "支持特征检测器: SuperPoint, SIFT, ORB, SURF\n"
+        "支持匹配器: LightGlue, BFMatcher\n"
+        "版本: 1.1\n\n"
+        "使用Qt 6.5.3 + OpenCV 4.10 + ONNX Runtime开发");
 }
 
 void MainWindow::on_operationGuide_triggered()
@@ -599,10 +689,12 @@ void MainWindow::on_operationGuide_triggered()
         "<li>确认图像扩展名（如 <code>*.jpg</code>）。</li>"
         "<li>按需启用‘分割图像’选项。</li>"
         "</ol>"
-        "<h3 style='color:#2563eb;'>二、模型与参数</h3>"
+        "<h3 style='color:#2563eb;'>二、算法与参数</h3>"
         "<ol>"
-        "<li>在<b>模型设置</b>中确认 SuperPoint 和 LightGlue 模型路径。</li>"
-        "<li>在<b>拼接参数</b>中选择模式：<b>Panorama</b> 或 <b>Scans</b>。</li>"
+        "<li>在<b>拼接参数</b>中选择<b>特征检测器</b>：SuperPoint（深度学习）、SIFT、ORB 或 SURF（经典算法）。</li>"
+        "<li>选择<b>特征匹配器</b>：LightGlue（仅SuperPoint可用）或 BFMatcher（通用）。</li>"
+        "<li>如需对比不同检测器效果，建议统一使用 BFMatcher 保证匹配器一致。</li>"
+        "<li>SuperPoint 模式需在<b>模型设置</b>中指定 ONNX 模型路径。</li>"
         "<li>根据图像质量微调匹配阈值与置信度阈值。</li>"
         "</ol>"
         "<h3 style='color:#2563eb;'>三、输出与执行</h3>"
@@ -711,12 +803,17 @@ bool MainWindow::validateParameters()
         return false;
     }
 
-    if (ui->lineEdit_superPointModel->text().isEmpty()) {
+    bool isSuperPoint = (ui->comboBox_detector->currentIndex() == 0);
+    bool isLightGlue = (ui->comboBox_matcher->currentIndex() == 0);
+
+    // SuperPoint 检测器需要模型路径
+    if (isSuperPoint && ui->lineEdit_superPointModel->text().isEmpty()) {
         QMessageBox::warning(this, "警告", "请选择SuperPoint模型文件！");
         return false;
     }
 
-    if (ui->lineEdit_lightGlueModel->text().isEmpty()) {
+    // LightGlue 匹配器需要模型路径
+    if (isLightGlue && ui->lineEdit_lightGlueModel->text().isEmpty()) {
         QMessageBox::warning(this, "警告", "请选择LightGlue模型文件！");
         return false;
     }
