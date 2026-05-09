@@ -443,6 +443,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->comboBox_matcher, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
     updateAlgoVisibility();
 
+    // 输出文件夹路径变化时，同步更新输出文件名
+    connect(ui->lineEdit_outputDir, &QLineEdit::textChanged, this, [this](const QString& text) {
+        if (!text.isEmpty()) {
+            ui->lineEdit_outputName->setText(QFileInfo(text).fileName() + ".jpg");
+        }
+    });
+
     appendLog("SuperStitch GUI 已启动");
 }
 
@@ -476,9 +483,10 @@ void MainWindow::on_browseImageDir_clicked()
         ui->lineEdit_imageDir->setText(dir);
         appendLog("选择图像文件夹: " + dir);
 
-        // 默认将输出文件夹设置为图像文件夹下的 superstitch 目录
+        // 默认将输出文件夹设置为图像文件夹下的 stitchGUI 目录
         QString defaultOutputDir = dir + "/stitchGUI";
         ui->lineEdit_outputDir->setText(defaultOutputDir);
+        ui->lineEdit_outputName->setText(QFileInfo(defaultOutputDir).fileName() + ".jpg");
     }
 }
 
@@ -505,6 +513,7 @@ void MainWindow::on_browseOutputDir_clicked()
     QString dir = QFileDialog::getExistingDirectory(this, "选择输出文件夹", "");
     if (!dir.isEmpty()) {
         ui->lineEdit_outputDir->setText(dir);
+        ui->lineEdit_outputName->setText(QFileInfo(dir).fileName() + ".jpg");
         appendLog("选择输出文件夹: " + dir);
     }
 }
