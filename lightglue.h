@@ -1,0 +1,64 @@
+#pragma once
+
+#include <vector>
+#include <string>
+#include <memory>
+#include <iostream>
+
+#include <opencv2/opencv.hpp>
+
+#include "dlldefine.h"
+
+
+using namespace cv::detail;
+
+
+
+class  SUPERSTITCH_EXPORTS LightGlue :public FeaturesMatcher
+{
+protected:
+	cv::Stitcher::Mode m_mode;
+
+	std::wstring m_modelPath;
+
+	std::vector<cv::detail::ImageFeatures> features_;
+
+	std::vector<cv::detail::MatchesInfo> pairwise_matches_;
+
+	float m_matchThresh = 0.0;
+
+	CV_WRAP_AS(apply) void operator ()(
+		const ImageFeatures& features1,
+		const ImageFeatures& features2,
+		CV_OUT MatchesInfo& matches_info)
+	{
+		match(features1, features2, matches_info);
+	}
+
+	void AddFeature(cv::detail::ImageFeatures features);
+
+	void AddMatcheinfo(const MatchesInfo& matches_info);
+
+public:
+	LightGlue(
+		std::wstring modelPath,
+		cv::Stitcher::Mode mode,
+		float matchThresh);
+
+	void match(
+		const ImageFeatures& features1,
+		const ImageFeatures& features2,
+		MatchesInfo& matches_info);
+
+	std::vector<cv::detail::ImageFeatures> features()
+	{
+		return features_;
+	};
+
+
+	std::vector<cv::detail::MatchesInfo> matchinfo()
+	{
+		return pairwise_matches_;
+	};
+
+};
