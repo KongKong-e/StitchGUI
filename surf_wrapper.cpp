@@ -31,6 +31,7 @@ static void parallelsurfToCv(
         cvKps[i].pt.y = (float)kp._y;
         cvKps[i].size = (float)(kp._scale * 2.5f);
         cvKps[i].response = (float)kp._score;
+        cvKps[i].angle = (float)(kp._ori * 180.0 / CV_PI);
 
         if (vecLen > 0)
         {
@@ -95,6 +96,7 @@ void SurfDetector::detect(
         keypoints[i].pt.y = (float)psKps[i]._y;
         keypoints[i].size = (float)(psKps[i]._scale * 2.5f);
         keypoints[i].response = (float)psKps[i]._score;
+        keypoints[i].angle = (float)(psKps[i]._ori * 180.0 / CV_PI);
     }
 }
 
@@ -115,6 +117,8 @@ void SurfDetector::compute(
     cvg::Surf surf(m_extended);
 
     // Convert cv::KeyPoint to ParallelSurf::KeyPoint
+    // Note: cv::Stitcher calls detect() first which already assigns orientations,
+    // so we preserve the angle from cv::KeyPoint and skip re-computing orientations.
     std::vector<ParallelSurf::KeyPoint> psKps(keypoints.size());
     for (size_t i = 0; i < keypoints.size(); i++)
     {
@@ -122,11 +126,12 @@ void SurfDetector::compute(
         psKps[i]._y = keypoints[i].pt.y;
         psKps[i]._scale = keypoints[i].size / 2.5;
         psKps[i]._score = keypoints[i].response;
+        psKps[i]._trace = 0;
+        psKps[i]._ori = keypoints[i].angle * CV_PI / 180.0;
     }
 
-    // Assign orientations and compute descriptors
-    surf.assignOrientations(psImg, psKps.begin(), psKps.end());
-    surf.compute(psImg, psKps);
+    // Compute descriptors (orientations already set from cv::KeyPoint::angle)
+    surf.makeDescriptors(psImg, psKps.begin(), psKps.end());
 
     // Convert descriptors to cv::Mat
     int vecLen = psKps[0]._vec.size();

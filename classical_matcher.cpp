@@ -32,8 +32,9 @@ void ClassicalMatcher::match(
     }
     else
     {
-        // SIFT/SuperPoint 等 float 描述子：FLANN KD-Tree
-        cv::FlannBasedMatcher matcher;
+        // SIFT/SuperPoint/SURF 等 float 描述子：BFMatcher + L2 距离
+        // 注意：FLANN KD-Tree 在某些 OpenCV 构建中处理 SURF 描述子会导致堆损坏
+        cv::BFMatcher matcher(cv::NORM_L2);
         matcher.knnMatch(features1.descriptors, features2.descriptors, knnMatches, 2);
     }
 

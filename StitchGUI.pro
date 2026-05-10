@@ -97,6 +97,11 @@ win32 {
     QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${OPENCV_BIN}\\opencv_world4100$${DLL_SUFFIX}.dll\" \"$${DESTDIR_WIN}\\\" &)
     QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${OPENCV_BIN}\\opencv_videoio_ffmpeg4100_64.dll\" \"$${DESTDIR_WIN}\\\" &)
     QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${ONNX_LIB}\\onnxruntime.dll\" \"$${DESTDIR_WIN}\\\" &)
+
+    # Copy model directory to build output
+    MODEL_SRC = $$PWD/model
+    MODEL_SRC ~= s,/,\\,g
+    QMAKE_POST_LINK += $$quote(cmd /c xcopy /E /I /Y \"$${MODEL_SRC}\" \"$${DESTDIR_WIN}\\model\\\" &)
 }
 
 # Default rules for deployment.

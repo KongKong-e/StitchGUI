@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QStandardItemModel>
+#include <QCoreApplication>
 
 StitchingWorker::StitchingWorker(QObject* parent)
     : QObject(parent)
@@ -401,9 +402,10 @@ MainWindow::MainWindow(QWidget *parent)
     ui->menu_2->insertAction(ui->action_about, operationGuideAction);
     connect(operationGuideAction, &QAction::triggered, this, &MainWindow::on_operationGuide_triggered);
     
-    // 预设模型路径
-    QString superPointPath = "D:/code/Qt/StitchGUI-github/model/superpoint.onnx";
-    QString lightGluePath = "D:/code/Qt/StitchGUI-github/model/superpoint_lightglue.onnx";
+    // 预设模型路径（相对于可执行文件目录）
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString superPointPath = appDir + "/model/superpoint.onnx";
+    QString lightGluePath = appDir + "/model/superpoint_lightglue.onnx";
     ui->lineEdit_superPointModel->setText(superPointPath);
     ui->lineEdit_lightGlueModel->setText(lightGluePath);
     
