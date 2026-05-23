@@ -65,49 +65,6 @@
        </widget>
       </item>
       <item>
-       <widget class="QGroupBox" name="groupBox_2">
-        <property name="title">
-         <string>模型设置</string>
-        </property>
-        <layout class="QGridLayout" name="gridLayout_2">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_3">
-           <property name="text">
-            <string>SuperPoint模型：</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QLineEdit" name="lineEdit_superPointModel"/>
-         </item>
-         <item row="0" column="2">
-          <widget class="QPushButton" name="pushButton_browseSuperPoint">
-           <property name="text">
-            <string>浏览...</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_4">
-           <property name="text">
-            <string>LightGlue模型：</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QLineEdit" name="lineEdit_lightGlueModel"/>
-         </item>
-         <item row="1" column="2">
-          <widget class="QPushButton" name="pushButton_browseLightGlue">
-           <property name="text">
-            <string>浏览...</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item>
        <widget class="QGroupBox" name="groupBox_3">
         <property name="title">
          <string>拼接参数</string>
@@ -346,42 +303,60 @@
      </layout>
     </item>
     <item>
-     <widget class="QGroupBox" name="groupBox_5">
-      <property name="title">
-       <string>结果预览</string>
-      </property>
-      <layout class="QVBoxLayout" name="verticalLayout_2">
-       <item>
-        <widget class="QScrollArea" name="scrollArea">
-         <property name="widgetResizable">
-          <bool>true</bool>
-         </property>
-         <widget class="QWidget" name="scrollAreaWidgetContents">
-          <property name="geometry">
-           <rect>
-            <x>0</x>
-            <y>0</y>
-            <width>576</width>
-            <height>725</height>
-           </rect>
-          </property>
-          <layout class="QVBoxLayout" name="verticalLayout_3">
-           <item>
-            <widget class="QLabel" name="label_result">
-             <property name="text">
-              <string>拼接结果将显示在这里</string>
-             </property>
-             <property name="alignment">
-              <set>Qt::AlignCenter</set>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </widget>
-        </widget>
-       </item>
-      </layout>
-     </widget>
+     <layout class="QVBoxLayout" name="verticalLayout_right">
+      <item>
+       <widget class="QGroupBox" name="groupBox_inputImages">
+        <property name="title">
+         <string>待拼接图片</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_input">
+         <item>
+          <widget class="QScrollArea" name="scrollArea_input">
+           <property name="widgetResizable">
+            <bool>true</bool>
+           </property>
+           <property name="horizontalScrollBarPolicy">
+            <enum>Qt::ScrollBarAsNeeded</enum>
+           </property>
+           <property name="verticalScrollBarPolicy">
+            <enum>Qt::ScrollBarAlwaysOff</enum>
+           </property>
+           <widget class="QWidget" name="inputImagesContainer">
+            <property name="geometry">
+             <rect>
+              <x>0</x>
+              <y>0</y>
+              <width>400</width>
+              <height>130</height>
+             </rect>
+            </property>
+            <layout class="QHBoxLayout" name="hLayout_inputImages"/>
+           </widget>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="QGroupBox" name="groupBox_5">
+        <property name="title">
+         <string>结果预览</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_2">
+         <item>
+          <widget class="QGraphicsView" name="graphicsView_result">
+           <property name="horizontalScrollBarPolicy">
+            <enum>Qt::ScrollBarAlwaysOff</enum>
+           </property>
+           <property name="verticalScrollBarPolicy">
+            <enum>Qt::ScrollBarAlwaysOff</enum>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
     </item>
    </layout>
   </widget>
@@ -402,6 +377,12 @@
     <addaction name="separator"/>
     <addaction name="action_exit"/>
    </widget>
+   <widget class="QMenu" name="menu_settings">
+    <property name="title">
+     <string>设置</string>
+    </property>
+    <addaction name="action_modelSettings"/>
+   </widget>
    <widget class="QMenu" name="menu_2">
     <property name="title">
      <string>帮助</string>
@@ -409,6 +390,7 @@
     <addaction name="action_about"/>
    </widget>
    <addaction name="menu"/>
+   <addaction name="menu_settings"/>
    <addaction name="menu_2"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
@@ -425,6 +407,11 @@
   <action name="action_about">
    <property name="text">
     <string>关于</string>
+   </property>
+  </action>
+  <action name="action_modelSettings">
+   <property name="text">
+    <string>模型设置...</string>
    </property>
   </action>
  </widget>

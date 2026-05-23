@@ -4,6 +4,9 @@
 #include <QMainWindow>
 #include <QThread>
 #include <QMutex>
+#include <QDialog>
+#include <QGraphicsScene>
+#include <QGraphicsPixmapItem>
 #include <opencv2/opencv.hpp>
 #include "superpoint.h"
 #include "lightglue.h"
@@ -85,8 +88,6 @@ public:
 
 private slots:
     void on_browseImageDir_clicked();
-    void on_browseSuperPoint_clicked();
-    void on_browseLightGlue_clicked();
     void on_browseOutputDir_clicked();
     void on_startStitching_clicked();
     void on_reset_clicked();
@@ -95,6 +96,9 @@ private slots:
     void on_exit_triggered();
     void on_operationGuide_triggered();
     void on_about_triggered();
+    void on_modelSettings_triggered();
+    void on_rotateLeft_clicked();
+    void on_rotateRight_clicked();
     void on_stitchingFinished();
     void on_stitchingProgress(int value);
     void on_stitchingLog(const QString& message);
@@ -107,12 +111,27 @@ private:
     QThread* m_workerThread;
     StitchingWorker* m_worker;
     QString m_currentRunTag;
+    QString m_superPointPath;
+    QString m_lightGluePath;
 
     void initializeConnections();
     void updateUIState(bool processing);
     void displayImage(const cv::Mat& image);
     void appendLog(const QString& message);
     bool validateParameters();
+
+    // 输入图片预览
+    void loadInputImages(const QString& dir);
+
+    // 结果预览缩放/旋转
+    QGraphicsScene* m_resultScene;
+    QGraphicsPixmapItem* m_resultPixmapItem;
+    QPixmap m_currentResult;
+    int m_rotationAngle;
+    double m_zoomFactor;
+    QPoint m_lastMousePos;
+
+    bool eventFilter(QObject* obj, QEvent* event) override;
 };
 
 #endif // MAINWINDOW_H

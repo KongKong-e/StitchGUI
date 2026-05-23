@@ -6,11 +6,17 @@
 #include <QDateTime>
 #include <QPixmap>
 #include <QImage>
+#include <QImageReader>
+#include <QWheelEvent>
+#include <QMouseEvent>
 #include <QFont>
 #include <QAction>
 #include <QFile>
 #include <QTextStream>
 #include <QDialog>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPushButton>
 #include <QTextBrowser>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -357,12 +363,10 @@ MainWindow::MainWindow(QWidget *parent)
         "  border-radius: 8px;"
         "  selection-background-color: #244f7a;"
         "}"
-        "QLabel#label_result {"
+        "QGraphicsView {"
         "  background: #fbfcfe;"
-        "  color: #6b7484;"
-        "  border: 1px dashed #c7d2e0;"
+        "  border: 1px solid #c7d2e0;"
         "  border-radius: 8px;"
-        "  min-height: 460px;"
         "}"
     );
 
@@ -373,22 +377,22 @@ MainWindow::MainWindow(QWidget *parent)
     ui->horizontalLayout_main->setSpacing(12);
     ui->verticalLayout->setSpacing(3);
     ui->gridLayout->setVerticalSpacing(4);
-    ui->gridLayout_2->setVerticalSpacing(4);
     ui->gridLayout_3->setVerticalSpacing(4);
     ui->gridLayout_4->setVerticalSpacing(4);
     ui->horizontalLayout_main->setStretch(0, 5);
     ui->horizontalLayout_main->setStretch(1, 7);
 
+    // 右侧上下比例：待拼接图片(1) : 结果预览(3)
+    ui->verticalLayout_right->setStretch(0, 1);
+    ui->verticalLayout_right->setStretch(1, 3);
+
     // 保持紧凑但不拥挤: 取消过严高度限制，避免控件挤压重叠
     ui->groupBox->setMaximumHeight(QWIDGETSIZE_MAX);
-    ui->groupBox_2->setMaximumHeight(QWIDGETSIZE_MAX);
     ui->groupBox_3->setMaximumHeight(QWIDGETSIZE_MAX);
     ui->groupBox_4->setMaximumHeight(QWIDGETSIZE_MAX);
 
     ui->lineEdit_imageDir->setPlaceholderText("请选择待拼接图像文件夹");
     ui->lineEdit_outputDir->setPlaceholderText("请选择输出文件夹");
-    ui->lineEdit_superPointModel->setPlaceholderText("请选择 superpoint.onnx");
-    ui->lineEdit_lightGlueModel->setPlaceholderText("请选择 lightglue.onnx");
     ui->pushButton_startStitching->setText("开始拼接");
     ui->pushButton_reset->setText("重置任务");
     ui->textEdit_log->setMinimumHeight(190);
@@ -408,12 +412,36 @@ MainWindow::MainWindow(QWidget *parent)
     
     // 预设模型路径（相对于可执行文件目录）
     QString appDir = QCoreApplication::applicationDirPath();
-    QString superPointPath = appDir + "/model/superpoint.onnx";
-    QString lightGluePath = appDir + "/model/superpoint_lightglue.onnx";
-    ui->lineEdit_superPointModel->setText(superPointPath);
-    ui->lineEdit_lightGlueModel->setText(lightGluePath);
-    
+    m_superPointPath = appDir + "/model/superpoint.onnx";
+    m_lightGluePath = appDir + "/model/superpoint_lightglue.onnx";
+
     initializeConnections();
+
+    // 设置菜单
+    connect(ui->action_modelSettings, &QAction::triggered, this, &MainWindow::on_modelSettings_triggered);
+
+    // 结果预览：QGraphicsScene + 缩放/旋转
+    m_resultScene = new QGraphicsScene(this);
+    m_resultPixmapItem = nullptr;
+    m_rotationAngle = 0;
+    m_zoomFactor = 1.0;
+    ui->graphicsView_result->setScene(m_resultScene);
+    ui->graphicsView_result->setRenderHint(QPainter::SmoothPixmapTransform);
+    ui->graphicsView_result->installEventFilter(this);
+
+    // 旋转按钮
+    QPushButton* rotateLeftBtn = new QPushButton("左旋90°", this);
+    QPushButton* rotateRightBtn = new QPushButton("右旋90°", this);
+    QHBoxLayout* rotateLayout = new QHBoxLayout();
+    rotateLayout->addStretch();
+    rotateLayout->addWidget(rotateLeftBtn);
+    rotateLayout->addWidget(rotateRightBtn);
+    ui->verticalLayout_2->insertLayout(0, rotateLayout);
+    connect(rotateLeftBtn, &QPushButton::clicked, this, &MainWindow::on_rotateLeft_clicked);
+    connect(rotateRightBtn, &QPushButton::clicked, this, &MainWindow::on_rotateRight_clicked);
+
+    // 待拼接图片：选择文件夹后自动加载缩略图
+    connect(ui->lineEdit_imageDir, &QLineEdit::textChanged, this, &MainWindow::loadInputImages);
 
     // 检测器/匹配器联动逻辑
     auto updateAlgoVisibility = [this]() {
@@ -433,17 +461,6 @@ MainWindow::MainWindow(QWidget *parent)
         if (model) {
             model->item(0)->setEnabled(isSuperPoint);
         }
-
-        // 模型路径显隐：SuperPoint 检测器 → 显示模型路径
-        ui->label_3->setVisible(isSuperPoint);
-        ui->lineEdit_superPointModel->setVisible(isSuperPoint);
-        ui->pushButton_browseSuperPoint->setVisible(isSuperPoint);
-
-        // LightGlue 模型路径：SuperPoint 且选了 LightGlue 时才显示
-        bool showLG = isSuperPoint && (ui->comboBox_matcher->currentIndex() == 0);
-        ui->label_4->setVisible(showLG);
-        ui->lineEdit_lightGlueModel->setVisible(showLG);
-        ui->pushButton_browseLightGlue->setVisible(showLG);
     };
     connect(ui->comboBox_detector, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
     connect(ui->comboBox_matcher, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
@@ -471,8 +488,6 @@ MainWindow::~MainWindow()
 void MainWindow::initializeConnections()
 {
     connect(ui->pushButton_browseImageDir, &QPushButton::clicked, this, &MainWindow::on_browseImageDir_clicked);
-    connect(ui->pushButton_browseSuperPoint, &QPushButton::clicked, this, &MainWindow::on_browseSuperPoint_clicked);
-    connect(ui->pushButton_browseLightGlue, &QPushButton::clicked, this, &MainWindow::on_browseLightGlue_clicked);
     connect(ui->pushButton_browseOutputDir, &QPushButton::clicked, this, &MainWindow::on_browseOutputDir_clicked);
     connect(ui->pushButton_startStitching, &QPushButton::clicked, this, &MainWindow::on_startStitching_clicked);
     connect(ui->pushButton_reset, &QPushButton::clicked, this, &MainWindow::on_reset_clicked);
@@ -496,24 +511,6 @@ void MainWindow::on_browseImageDir_clicked()
     }
 }
 
-void MainWindow::on_browseSuperPoint_clicked()
-{
-    QString file = QFileDialog::getOpenFileName(this, "选择SuperPoint模型文件", "", "ONNX Files (*.onnx)");
-    if (!file.isEmpty()) {
-        ui->lineEdit_superPointModel->setText(file);
-        appendLog("选择SuperPoint模型: " + file);
-    }
-}
-
-void MainWindow::on_browseLightGlue_clicked()
-{
-    QString file = QFileDialog::getOpenFileName(this, "选择LightGlue模型文件", "", "ONNX Files (*.onnx)");
-    if (!file.isEmpty()) {
-        ui->lineEdit_lightGlueModel->setText(file);
-        appendLog("选择LightGlue模型: " + file);
-    }
-}
-
 void MainWindow::on_browseOutputDir_clicked()
 {
     QString dir = QFileDialog::getExistingDirectory(this, "选择输出文件夹", "");
@@ -521,6 +518,67 @@ void MainWindow::on_browseOutputDir_clicked()
         ui->lineEdit_outputDir->setText(dir);
         ui->lineEdit_outputName->setText(QFileInfo(dir).fileName() + ".jpg");
         appendLog("选择输出文件夹: " + dir);
+    }
+}
+
+void MainWindow::on_modelSettings_triggered()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("模型设置");
+    dialog.setMinimumWidth(500);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
+
+    // SuperPoint 模型
+    QHBoxLayout* spLayout = new QHBoxLayout();
+    QLabel* spLabel = new QLabel("SuperPoint模型：", &dialog);
+    QLineEdit* spEdit = new QLineEdit(&dialog);
+    spEdit->setText(m_superPointPath);
+    spEdit->setPlaceholderText("请选择 superpoint.onnx");
+    QPushButton* spBrowse = new QPushButton("浏览...", &dialog);
+    spLayout->addWidget(spLabel);
+    spLayout->addWidget(spEdit, 1);
+    spLayout->addWidget(spBrowse);
+    mainLayout->addLayout(spLayout);
+
+    // LightGlue 模型
+    QHBoxLayout* lgLayout = new QHBoxLayout();
+    QLabel* lgLabel = new QLabel("LightGlue模型：", &dialog);
+    QLineEdit* lgEdit = new QLineEdit(&dialog);
+    lgEdit->setText(m_lightGluePath);
+    lgEdit->setPlaceholderText("请选择 lightglue.onnx");
+    QPushButton* lgBrowse = new QPushButton("浏览...", &dialog);
+    lgLayout->addWidget(lgLabel);
+    lgLayout->addWidget(lgEdit, 1);
+    lgLayout->addWidget(lgBrowse);
+    mainLayout->addLayout(lgLayout);
+
+    // 浏览按钮连接
+    connect(spBrowse, &QPushButton::clicked, [&]() {
+        QString file = QFileDialog::getOpenFileName(&dialog, "选择SuperPoint模型文件", "", "ONNX Files (*.onnx)");
+        if (!file.isEmpty()) spEdit->setText(file);
+    });
+    connect(lgBrowse, &QPushButton::clicked, [&]() {
+        QString file = QFileDialog::getOpenFileName(&dialog, "选择LightGlue模型文件", "", "ONNX Files (*.onnx)");
+        if (!file.isEmpty()) lgEdit->setText(file);
+    });
+
+    // 确定/取消按钮
+    QHBoxLayout* btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+    QPushButton* okBtn = new QPushButton("确定", &dialog);
+    QPushButton* cancelBtn = new QPushButton("取消", &dialog);
+    btnLayout->addWidget(okBtn);
+    btnLayout->addWidget(cancelBtn);
+    mainLayout->addLayout(btnLayout);
+
+    connect(okBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+    connect(cancelBtn, &QPushButton::clicked, &dialog, &QDialog::reject);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        m_superPointPath = spEdit->text();
+        m_lightGluePath = lgEdit->text();
+        appendLog("模型路径已更新");
     }
 }
 
@@ -544,8 +602,8 @@ void MainWindow::on_startStitching_clicked()
     std::string imageDir = ui->lineEdit_imageDir->text().toStdString();
     std::string extension = ui->lineEdit_extension->text().toStdString();
     bool divideImages = ui->checkBox_divideImages->isChecked();
-    std::wstring superPointPath = ui->lineEdit_superPointModel->text().toStdWString();
-    std::wstring lightGluePath = ui->lineEdit_lightGlueModel->text().toStdWString();
+    std::wstring superPointPath = m_superPointPath.toStdWString();
+    std::wstring lightGluePath = m_lightGluePath.toStdWString();
     cv::Stitcher::Mode mode = (ui->comboBox_mode->currentIndex() == 0) ? cv::Stitcher::PANORAMA : cv::Stitcher::SCANS;
 
     // 拼接方向：0=自动, 1=水平, 2=垂直
@@ -616,7 +674,11 @@ void MainWindow::on_reset_clicked()
     ui->progressBar->setValue(0);
     
     // 重置结果显示
-    ui->label_result->setText("拼接结果将显示在这里");
+    m_resultScene->clear();
+    m_resultPixmapItem = nullptr;
+    m_currentResult = QPixmap();
+    m_rotationAngle = 0;
+    m_zoomFactor = 1.0;
     
     // 允许用户重新操作
     updateUIState(false);
@@ -783,7 +845,6 @@ void MainWindow::updateUIState(bool processing)
     ui->pushButton_startStitching->setEnabled(!processing);
     ui->pushButton_reset->setEnabled(!processing);
     ui->groupBox->setEnabled(!processing);
-    ui->groupBox_2->setEnabled(!processing);
     ui->groupBox_3->setEnabled(!processing);
     ui->groupBox_4->setEnabled(!processing);
 }
@@ -804,9 +865,144 @@ void MainWindow::displayImage(const cv::Mat& image)
     }
 
     QImage qImage(rgbImage.data, rgbImage.cols, rgbImage.rows, rgbImage.step, QImage::Format_RGB888);
-    QPixmap pixmap = QPixmap::fromImage(qImage);
+    m_currentResult = QPixmap::fromImage(qImage);
+    m_rotationAngle = 0;
+    m_zoomFactor = 1.0;
 
-    ui->label_result->setPixmap(pixmap.scaled(ui->label_result->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    m_resultScene->clear();
+    m_resultPixmapItem = m_resultScene->addPixmap(m_currentResult);
+    m_resultPixmapItem->setTransformOriginPoint(m_currentResult.width() / 2.0, m_currentResult.height() / 2.0);
+    m_resultScene->setSceneRect(m_currentResult.rect());
+    ui->graphicsView_result->setTransformationAnchor(QGraphicsView::NoAnchor);
+    ui->graphicsView_result->resetTransform();
+    ui->graphicsView_result->fitInView(m_resultPixmapItem, Qt::KeepAspectRatio);
+}
+
+void MainWindow::loadInputImages(const QString& dir)
+{
+    // 清空旧缩略图
+    QLayout* layout = ui->hLayout_inputImages;
+    while (QLayoutItem* item = layout->takeAt(0)) {
+        if (item->widget()) {
+            delete item->widget();
+        }
+        delete item;
+    }
+
+    if (dir.isEmpty()) return;
+
+    // 获取文件列表
+    std::vector<std::string> files;
+    libpano::get_filenames_with_absolute_path(dir.toStdString(), files, ui->lineEdit_extension->text().toStdString());
+
+    // 根据滚动区域实际可用高度计算缩略图高度
+    int targetHeight = ui->scrollArea_input->viewport()->height() - 8;
+    if (targetHeight < 40) targetHeight = 120;
+
+    for (const auto& filePath : files) {
+        QString qPath = QString::fromStdString(filePath);
+        QImageReader reader(qPath);
+        reader.setAutoTransform(true);
+        QImage img = reader.read();
+        if (img.isNull()) continue;
+
+        QPixmap pixmap = QPixmap::fromImage(img);
+        QPixmap scaled = pixmap.scaledToHeight(targetHeight, Qt::SmoothTransformation);
+
+        QLabel* thumbLabel = new QLabel();
+        thumbLabel->setPixmap(scaled);
+        thumbLabel->setToolTip(QFileInfo(qPath).fileName());
+        thumbLabel->setFixedSize(scaled.size());
+        thumbLabel->setStyleSheet("border: 1px solid #d0d8e3; border-radius: 4px; margin: 2px;");
+        layout->addWidget(thumbLabel);
+    }
+
+    // 添加弹性空间，让缩略图靠左排列
+    layout->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum));
+}
+
+void MainWindow::on_rotateLeft_clicked()
+{
+    if (!m_resultPixmapItem) return;
+    m_rotationAngle = (m_rotationAngle - 90) % 360;
+    QTransform t;
+    t.rotate(m_rotationAngle);
+    t.scale(m_zoomFactor, m_zoomFactor);
+    m_resultPixmapItem->setTransform(t);
+}
+
+void MainWindow::on_rotateRight_clicked()
+{
+    if (!m_resultPixmapItem) return;
+    m_rotationAngle = (m_rotationAngle + 90) % 360;
+    QTransform t;
+    t.rotate(m_rotationAngle);
+    t.scale(m_zoomFactor, m_zoomFactor);
+    m_resultPixmapItem->setTransform(t);
+}
+
+bool MainWindow::eventFilter(QObject* obj, QEvent* event)
+{
+    if (obj == ui->graphicsView_result && m_resultPixmapItem) {
+        if (event->type() == QEvent::Wheel) {
+            QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
+            double angle = wheelEvent->angleDelta().y();
+            double factor = (angle > 0) ? 1.15 : 1.0 / 1.15;
+            m_zoomFactor *= factor;
+            m_zoomFactor = qBound(0.05, m_zoomFactor, 50.0);
+
+            // 以鼠标位置为中心缩放
+            QPointF scenePos = ui->graphicsView_result->mapToScene(wheelEvent->position().toPoint());
+            QTransform t;
+            t.rotate(m_rotationAngle);
+            t.scale(m_zoomFactor, m_zoomFactor);
+            m_resultPixmapItem->setTransform(t);
+            QPointF viewPos = ui->graphicsView_result->mapFromScene(scenePos);
+            QPointF delta = wheelEvent->position() - viewPos;
+            ui->graphicsView_result->translate(delta.x(), delta.y());
+            return true;
+        }
+        if (event->type() == QEvent::MouseButtonPress) {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                m_lastMousePos = mouseEvent->pos();
+                ui->graphicsView_result->setCursor(Qt::ClosedHandCursor);
+                return true;
+            }
+            if (mouseEvent->button() == Qt::RightButton) {
+                m_lastMousePos = mouseEvent->pos();
+                return true;
+            }
+        }
+        if (event->type() == QEvent::MouseMove) {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->buttons() & Qt::LeftButton) {
+                QPoint delta = mouseEvent->pos() - m_lastMousePos;
+                m_lastMousePos = mouseEvent->pos();
+                ui->graphicsView_result->translate(delta.x(), delta.y());
+                return true;
+            }
+            if (mouseEvent->buttons() & Qt::RightButton) {
+                int dx = mouseEvent->pos().x() - m_lastMousePos.x();
+                m_rotationAngle = (m_rotationAngle + dx) % 360;
+                m_lastMousePos = mouseEvent->pos();
+
+                QTransform t;
+                t.rotate(m_rotationAngle);
+                t.scale(m_zoomFactor, m_zoomFactor);
+                m_resultPixmapItem->setTransform(t);
+                return true;
+            }
+        }
+        if (event->type() == QEvent::MouseButtonRelease) {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                ui->graphicsView_result->setCursor(Qt::ArrowCursor);
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(obj, event);
 }
 
 void MainWindow::appendLog(const QString& message)
@@ -826,14 +1022,14 @@ bool MainWindow::validateParameters()
     bool isLightGlue = (ui->comboBox_matcher->currentIndex() == 0);
 
     // SuperPoint 检测器需要模型路径
-    if (isSuperPoint && ui->lineEdit_superPointModel->text().isEmpty()) {
-        QMessageBox::warning(this, "警告", "请选择SuperPoint模型文件！");
+    if (isSuperPoint && m_superPointPath.isEmpty()) {
+        QMessageBox::warning(this, "警告", "请在 设置→模型设置 中配置SuperPoint模型文件！");
         return false;
     }
 
     // LightGlue 匹配器需要模型路径
-    if (isLightGlue && ui->lineEdit_lightGlueModel->text().isEmpty()) {
-        QMessageBox::warning(this, "警告", "请选择LightGlue模型文件！");
+    if (isLightGlue && m_lightGluePath.isEmpty()) {
+        QMessageBox::warning(this, "警告", "请在 设置→模型设置 中配置LightGlue模型文件！");
         return false;
     }
 
