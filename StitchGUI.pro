@@ -17,40 +17,40 @@ win32-msvc {
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
-    main.cpp \
-    mainwindow.cpp \
-    superpoint.cpp \
-    lightglue.cpp \
-    classical_matcher.cpp \
-    utils.cpp \
-    file_utils.cpp \
-    surf_wrapper.cpp \
-    Surf.cpp
+    src/app/main.cpp \
+    src/app/mainwindow.cpp \
+    src/core/superpoint.cpp \
+    src/core/lightglue.cpp \
+    src/core/classical_matcher.cpp \
+    src/core/surf_wrapper.cpp \
+    src/core/Surf.cpp \
+    src/utils/utils.cpp \
+    src/utils/file_utils.cpp
 
 HEADERS += \
-    mainwindow.h \
-    superpoint.h \
-    lightglue.h \
-    classical_matcher.h \
-    utils.h \
-    file_utils.h \
-    dlldefine.h \
-    surf_wrapper.h \
-    Surf.h \
-    parallelsurf/Image.h \
-    parallelsurf/KeyPoint.h \
-    parallelsurf/KeyPointDetector.h \
-    parallelsurf/KeyPointDescriptor.h \
-    parallelsurf/KeyPointDescriptorContext.h \
-    parallelsurf/BoxFilter.h \
-    parallelsurf/WaveFilter.h \
-    parallelsurf/MathStuff.h
+    src/app/mainwindow.h \
+    src/core/superpoint.h \
+    src/core/lightglue.h \
+    src/core/classical_matcher.h \
+    src/core/surf_wrapper.h \
+    src/core/Surf.h \
+    src/core/dlldefine.h \
+    src/utils/utils.h \
+    src/utils/file_utils.h \
+    src/parallelsurf/Image.h \
+    src/parallelsurf/KeyPoint.h \
+    src/parallelsurf/KeyPointDetector.h \
+    src/parallelsurf/KeyPointDescriptor.h \
+    src/parallelsurf/KeyPointDescriptorContext.h \
+    src/parallelsurf/BoxFilter.h \
+    src/parallelsurf/WaveFilter.h \
+    src/parallelsurf/MathStuff.h
 
 FORMS += \
-    mainwindow.ui
+    src/app/mainwindow.ui
 
 RESOURCES += \
-    resources.qrc
+    resources/resources.qrc
 
 # OpenCV and ONNX Runtime paths
 OPENCV_PATH = "D:/code/DATA/3rdParty/opencv-sdk"
@@ -61,8 +61,10 @@ INCLUDEPATH += \
     $$OPENCV_PATH/include/opencv2 \
     $$OPENCV_PATH/include \
     $$ONNXRUNTIME_PATH/include \
-    $$PWD \
-    $$PWD/parallelsurf
+    $$PWD/src \
+    $$PWD/src/core \
+    $$PWD/src/utils \
+    $$PWD/src/parallelsurf
 
 # Library paths
 CONFIG(debug, debug|release) {

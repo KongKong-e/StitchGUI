@@ -29,29 +29,37 @@
 ## 项目结构
 
 ```
-├── main.cpp                    # 入口
-├── mainwindow.cpp/h/ui         # 主窗口 GUI
-├── superpoint.cpp/h            # SuperPoint 特征检测器 (ONNX)
-├── lightglue.cpp/h             # LightGlue 特征匹配器 (ONNX)
-├── classical_matcher.cpp/h     # 经典匹配器 (BFMatcher)
-├── surf_wrapper.cpp/h          # SurfDetector: cv::Feature2D 包装层
-├── Surf.cpp/h                  # cvg::Surf 实现 (检测+描述子)
-├── utils.cpp/h                 # 图像读取、分割等工具函数
-├── file_utils.cpp/h            # 文件/目录操作
-├── dlldefine.h                 # 导出宏定义
-├── parallelsurf/               # ParallelSURF 库 (独立实现)
-│   ├── Image.h                 # 积分图像
-│   ├── KeyPoint.h              # 关键点数据结构
-│   ├── BoxFilter.h             # Hessian 盒式滤波器 (inline)
-│   ├── WaveFilter.h            # Haar 小波滤波器 (inline)
-│   ├── MathStuff.h             # 数学工具 (LUT, 线性方程求解)
-│   ├── KeyPointDetector.h      # 关键点检测器 (header only)
-│   ├── KeyPointDescriptor.h    # 描述子计算 (header only)
-│   └── KeyPointDescriptorContext.h  # 描述子上下文
+├── src/
+│   ├── app/                    # 应用入口 + 主窗口
+│   │   ├── main.cpp            # 入口
+│   │   ├── mainwindow.cpp/h    # 主窗口 GUI
+│   │   └── mainwindow.ui       # Qt Designer UI
+│   ├── core/                   # 特征检测/匹配核心算法
+│   │   ├── superpoint.cpp/h    # SuperPoint 特征检测器 (ONNX)
+│   │   ├── lightglue.cpp/h     # LightGlue 特征匹配器 (ONNX)
+│   │   ├── classical_matcher.cpp/h  # 经典匹配器 (BFMatcher)
+│   │   ├── surf_wrapper.cpp/h  # SurfDetector: cv::Feature2D 包装层
+│   │   ├── Surf.cpp/h          # cvg::Surf 实现 (检测+描述子)
+│   │   └── dlldefine.h         # 导出宏定义
+│   ├── utils/                  # 工具函数
+│   │   ├── utils.cpp/h         # 图像读取、分割等工具函数
+│   │   └── file_utils.cpp/h    # 文件/目录操作
+│   └── parallelsurf/           # ParallelSURF 库 (独立实现)
+│       ├── Image.h             # 积分图像
+│       ├── KeyPoint.h          # 关键点数据结构
+│       ├── BoxFilter.h         # Hessian 盒式滤波器 (inline)
+│       ├── WaveFilter.h        # Haar 小波滤波器 (inline)
+│       ├── MathStuff.h         # 数学工具 (LUT, 线性方程求解)
+│       ├── KeyPointDetector.h  # 关键点检测器 (header only)
+│       ├── KeyPointDescriptor.h # 描述子计算 (header only)
+│       └── KeyPointDescriptorContext.h # 描述子上下文
+├── resources/
+│   ├── resources.qrc           # Qt 资源文件
+│   └── images/                 # 图片资源
 └── model/                      # ONNX 模型 (gitignore)
 ```
 
-**注意**: `parallelsurf/*.cpp` 文件不参与编译。所有 ParallelSURF 实现通过 `Surf.cpp` 统一编译（Image 实现内联在 Surf.cpp 中），避免重复符号。
+**注意**: `src/parallelsurf/*.cpp` 文件不参与编译。所有 ParallelSURF 实现通过 `src/core/Surf.cpp` 统一编译（Image 实现内联在 Surf.cpp 中），避免重复符号。
 
 ## 核心架构
 

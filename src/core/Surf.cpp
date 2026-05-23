@@ -637,7 +637,7 @@ namespace cvg
 		return true;
 	}
 
-	//-------------------//特征描述子-----------------------------------
+	//-------------------特征描述子-----------------------------------
 
 
 	ParallelSurf::LUT<0, 83> Exp1(std::exp, 0.5, -0.08);
@@ -704,13 +704,31 @@ namespace cvg
 
 	void Surf::assignOrientation(ParallelSurf::Image& img, ParallelSurf::KeyPoint& ioKeyPoint) const
 	{
-		unsigned int aRX = ParallelSurf::Math::Round(ioKeyPoint._x);
-		unsigned int aRY = ParallelSurf::Math::Round(ioKeyPoint._y);
+		int aRX = ParallelSurf::Math::Round(ioKeyPoint._x);
+		int aRY = ParallelSurf::Math::Round(ioKeyPoint._y);
 		int aStep = (int)(ioKeyPoint._scale + 0.8);
 
-		//ParallelSurf::Image img = _image;
+		if (aRX < 0 || aRY < 0 ||
+			aRX >= (int)img.getWidth() || aRY >= (int)img.getHeight() ||
+			aStep < 1)
+		{
+			ioKeyPoint._ori = 0;
+			return;
+		}
 
-		WaveFilter aWaveFilter(2.0 * ioKeyPoint._scale + 1.6, img);
+		double waveSize = 2.0 * ioKeyPoint._scale + 1.6;
+		if (waveSize < 1.0) waveSize = 1.0;
+		int waveSizeI = ParallelSurf::Math::Round(waveSize);
+		if (waveSizeI < 1) waveSizeI = 1;
+
+		if (aRX <= waveSizeI || aRX + waveSizeI >= (int)img.getWidth() - 1 ||
+			aRY <= waveSizeI || aRY + waveSizeI >= (int)img.getHeight() - 1)
+		{
+			ioKeyPoint._ori = 0;
+			return;
+		}
+
+		WaveFilter aWaveFilter(waveSize, img);
 
 		std::vector< cvg::response > aRespVector;
 		aRespVector.reserve(253);
@@ -719,16 +737,18 @@ namespace cvg
 		for (int aYIt = -9; aYIt <= 9; aYIt++)
 		{
 			int aSY = aRY + aYIt * aStep;
+			if (aSY < 0 || aSY >= (int)img.getHeight()) continue;
 			for (int aXIt = -9; aXIt <= 9; aXIt++)
 			{
 				int aSX = aRX + aXIt * aStep;
+				if (aSX < 0 || aSX >= (int)img.getWidth()) continue;
 
 				// keep points in a circular region of diameter 6s
 				unsigned int aSqDist = aXIt * aXIt + aYIt * aYIt;
 				if (aSqDist <= 81 && aWaveFilter.checkBounds(aSX, aSY))
 				{
-					double aWavX = aWaveFilter.getWx(aSX, aSY);
-					double aWavY = aWaveFilter.getWy(aSX, aSY);
+					double aWavX = aWaveFilter.getWx((unsigned int)aSX, (unsigned int)aSY);
+					double aWavY = aWaveFilter.getWy((unsigned int)aSX, (unsigned int)aSY);
 					double aWavResp = std::sqrt(aWavX * aWavX + aWavY * aWavY);
 					if (aWavResp > 0)
 					{
@@ -867,7 +887,11 @@ namespace cvg
 					int aYSample = aIntS * aYIt + aIntY;
 					int aStep = (int)aS;
 
-					//ParallelSurf::Image img = _image;
+					if (aXSample < 0 || aYSample < 0 ||
+						aXSample >= (int)img.getWidth() || aYSample >= (int)img.getHeight())
+					{
+						continue;
+					}
 
 					WaveFilter aWaveFilter(aStep,/* img*/ img);
 
@@ -876,10 +900,13 @@ namespace cvg
 						continue;
 					}
 
-					double aExp = Exp2((int)(aV * aV + aU * aU));
+					int expIdx = (int)(aV * aV + aU * aU);
+					if (expIdx < 0) expIdx = 0;
+					if (expIdx > 40) expIdx = 40;
+					double aExp = Exp2(expIdx);
 
-					double aWavX = aWaveFilter.getWx(aXSample, aYSample) * aExp;
-					double aWavY = aWaveFilter.getWy(aXSample, aYSample) * aExp;
+					double aWavX = aWaveFilter.getWx((unsigned int)aXSample, (unsigned int)aYSample) * aExp;
+					double aWavY = aWaveFilter.getWy((unsigned int)aXSample, (unsigned int)aYSample) * aExp;
 
 					double aWavXR = (iCtx._cos * aWavX + iCtx._sin * aWavY);
 					double aWavYR = (iCtx._sin * aWavX - iCtx._cos * aWavY);

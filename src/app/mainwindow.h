@@ -34,6 +34,7 @@ public:
         const std::wstring& superPointPath,
         const std::wstring& lightGluePath,
         cv::Stitcher::Mode mode,
+        int waveCorrectKind,
         float matchThreshold,
         float confidenceThreshold,
         const std::string& outputDir,
@@ -59,6 +60,7 @@ private:
     std::wstring m_superPointPath;
     std::wstring m_lightGluePath;
     cv::Stitcher::Mode m_mode;
+    int m_waveCorrectKind;
     float m_matchThreshold;
     float m_confidenceThreshold;
     std::string m_outputDir;

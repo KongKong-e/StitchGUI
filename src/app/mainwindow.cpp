@@ -21,6 +21,7 @@ StitchingWorker::StitchingWorker(QObject* parent)
     : QObject(parent)
     , m_divideImages(false)
     , m_mode(cv::Stitcher::PANORAMA)
+    , m_waveCorrectKind(cv::detail::WAVE_CORRECT_AUTO)
     , m_matchThreshold(0.2f)
     , m_confidenceThreshold(0.1f)
     , m_saveMatching(false)
@@ -35,6 +36,7 @@ void StitchingWorker::setParameters(
     const std::wstring& superPointPath,
     const std::wstring& lightGluePath,
     cv::Stitcher::Mode mode,
+    int waveCorrectKind,
     float matchThreshold,
     float confidenceThreshold,
     const std::string& outputDir,
@@ -50,6 +52,7 @@ void StitchingWorker::setParameters(
     m_superPointPath = superPointPath;
     m_lightGluePath = lightGluePath;
     m_mode = mode;
+    m_waveCorrectKind = waveCorrectKind;
     m_matchThreshold = matchThreshold;
     m_confidenceThreshold = confidenceThreshold;
     m_outputDir = outputDir;
@@ -137,6 +140,7 @@ void StitchingWorker::process()
         stitcher->setPanoConfidenceThresh(m_confidenceThreshold);
         stitcher->setFeaturesFinder(detector);
         stitcher->setFeaturesMatcher(matcher);
+        stitcher->setWaveCorrectKind(static_cast<cv::detail::WaveCorrectKind>(m_waveCorrectKind));
 
         emit logMessage("正在执行...");
         cv::Mat pano;
@@ -543,6 +547,15 @@ void MainWindow::on_startStitching_clicked()
     std::wstring superPointPath = ui->lineEdit_superPointModel->text().toStdWString();
     std::wstring lightGluePath = ui->lineEdit_lightGlueModel->text().toStdWString();
     cv::Stitcher::Mode mode = (ui->comboBox_mode->currentIndex() == 0) ? cv::Stitcher::PANORAMA : cv::Stitcher::SCANS;
+
+    // 拼接方向：0=自动, 1=水平, 2=垂直
+    static const int waveCorrectKinds[] = {
+        cv::detail::WAVE_CORRECT_AUTO,
+        cv::detail::WAVE_CORRECT_HORIZ,
+        cv::detail::WAVE_CORRECT_VERT
+    };
+    int waveCorrectKind = waveCorrectKinds[ui->comboBox_direction->currentIndex()];
+
     float matchThreshold = ui->doubleSpinBox_matchThreshold->value();
     float confidenceThreshold = ui->doubleSpinBox_confidenceThreshold->value();
     std::string outputDir = ui->lineEdit_outputDir->text().toStdString();
@@ -567,6 +580,7 @@ void MainWindow::on_startStitching_clicked()
     m_worker->setParameters(
         imageDir, extension, divideImages,
         superPointPath, lightGluePath, mode,
+        waveCorrectKind,
         matchThreshold, confidenceThreshold,
         outputDir, outputName, saveMatching,
         detector, matcher);
