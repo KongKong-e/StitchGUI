@@ -206,14 +206,19 @@ namespace cvg
 
 	void Surf::compute(ParallelSurf::Image& img, std::vector<ParallelSurf::KeyPoint>& _Keypoints)
 	{
-
-		assert(_Keypoints.size() > 0);
+		if (_Keypoints.empty())
+		{
+			std::cerr << "Warning: no keypoints to compute descriptors for" << std::endl;
+			return;
+		}
 
 		std::cout << "Computing descriptors..";
-		this->makeDescriptors(img, _Keypoints.begin(), _Keypoints.end());
+		try {
+			this->makeDescriptors(img, _Keypoints.begin(), _Keypoints.end());
+		} catch (...) {
+			std::cerr << "Warning: makeDescriptors failed" << std::endl;
+		}
 		std::cout << "finished." << std::endl;
-
-
 	}
 
 
@@ -472,13 +477,20 @@ namespace cvg
 		std::cout << "Found " << _Keypoints.size() << " keypoints." << std::endl;
 
 		//计算特征点方向
-		this->assignOrientations(iImage, _Keypoints.begin(), _Keypoints.end());
+		try {
+			this->assignOrientations(iImage, _Keypoints.begin(), _Keypoints.end());
+		} catch (...) {
+			std::cerr << "Warning: assignOrientations failed, using default orientations" << std::endl;
+			for (size_t i = 0; i < _Keypoints.size(); i++)
+				_Keypoints[i]._ori = 0;
+		}
 
 		// deallocate memory of the scale images
 		for (int s = 0; s < _maxScales; ++s)
 		{
 			ParallelSurf::Image::DeallocateImage(aSH[s], iImage.getHeight());
 		}
+		delete[] aBorderSize;
 	}
 
 
@@ -667,14 +679,27 @@ namespace cvg
 
 	void Surf::makeDescriptor(ParallelSurf::Image& img, ParallelSurf::KeyPoint& ioKeyPoint) const
 	{
+		// validate keypoint coordinates
+		int cx = ParallelSurf::Math::Round(ioKeyPoint._x);
+		int cy = ParallelSurf::Math::Round(ioKeyPoint._y);
+		if (cx < 0 || cy < 0 || cx >= (int)img.getWidth() || cy >= (int)img.getHeight())
+		{
+			ioKeyPoint._vec.resize(getDescriptorLength(), 0.0);
+			return;
+		}
+
+		// validate scale: must be positive
+		if (ioKeyPoint._scale <= 0)
+		{
+			ioKeyPoint._vec.resize(getDescriptorLength(), 0.0);
+			return;
+		}
+
 		// create a descriptor context
 		ParallelSurf::KeyPointDescriptorContext aCtx(_subRegions, _vecLen, ioKeyPoint._ori);
 
 		// create the storage in the keypoint
 		ioKeyPoint._vec.resize(getDescriptorLength());
-
-		// assign the orientation
-		//assignOrientation(ioKeyPoint);
 
 		// create a vector
 		createDescriptor(aCtx, img, ioKeyPoint);
@@ -886,6 +911,7 @@ namespace cvg
 					int aXSample = aIntS * aXIt + aIntX;
 					int aYSample = aIntS * aYIt + aIntY;
 					int aStep = (int)aS;
+					if (aStep < 1) aStep = 1;
 
 					if (aXSample < 0 || aYSample < 0 ||
 						aXSample >= (int)img.getWidth() || aYSample >= (int)img.getHeight())

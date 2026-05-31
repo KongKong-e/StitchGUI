@@ -97,6 +97,8 @@ private slots:
     void on_operationGuide_triggered();
     void on_about_triggered();
     void on_modelSettings_triggered();
+    void on_zoomIn_clicked();
+    void on_zoomOut_clicked();
     void on_rotateLeft_clicked();
     void on_rotateRight_clicked();
     void on_stitchingFinished();
@@ -124,12 +126,14 @@ private:
     void loadInputImages(const QString& dir);
 
     // 结果预览缩放/旋转
+    void applyTransform();
     QGraphicsScene* m_resultScene;
     QGraphicsPixmapItem* m_resultPixmapItem;
     QPixmap m_currentResult;
     int m_rotationAngle;
     double m_zoomFactor;
     QPoint m_lastMousePos;
+    QPointF m_viewCenter;  // 视图中心在场景坐标系中的位置（用于平移/旋转/缩放）
 
     bool eventFilter(QObject* obj, QEvent* event) override;
 };

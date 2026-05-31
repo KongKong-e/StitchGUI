@@ -425,18 +425,29 @@ MainWindow::MainWindow(QWidget *parent)
     m_resultPixmapItem = nullptr;
     m_rotationAngle = 0;
     m_zoomFactor = 1.0;
+    m_viewCenter = QPointF(0, 0);
     ui->graphicsView_result->setScene(m_resultScene);
     ui->graphicsView_result->setRenderHint(QPainter::SmoothPixmapTransform);
-    ui->graphicsView_result->installEventFilter(this);
+    ui->graphicsView_result->viewport()->installEventFilter(this);
 
-    // 旋转按钮
+    // 工具栏按钮（居中）：放大、缩小、左旋、右旋
+    QPushButton* zoomInBtn = new QPushButton("放大", this);
+    QPushButton* zoomOutBtn = new QPushButton("缩小", this);
     QPushButton* rotateLeftBtn = new QPushButton("左旋90°", this);
     QPushButton* rotateRightBtn = new QPushButton("右旋90°", this);
-    QHBoxLayout* rotateLayout = new QHBoxLayout();
-    rotateLayout->addStretch();
-    rotateLayout->addWidget(rotateLeftBtn);
-    rotateLayout->addWidget(rotateRightBtn);
-    ui->verticalLayout_2->insertLayout(0, rotateLayout);
+    QHBoxLayout* toolbarLayout = new QHBoxLayout();
+    toolbarLayout->addStretch();
+    toolbarLayout->addWidget(zoomInBtn);
+    toolbarLayout->addSpacing(6);
+    toolbarLayout->addWidget(zoomOutBtn);
+    toolbarLayout->addSpacing(16);
+    toolbarLayout->addWidget(rotateLeftBtn);
+    toolbarLayout->addSpacing(6);
+    toolbarLayout->addWidget(rotateRightBtn);
+    toolbarLayout->addStretch();
+    ui->verticalLayout_2->insertLayout(0, toolbarLayout);
+    connect(zoomInBtn, &QPushButton::clicked, this, &MainWindow::on_zoomIn_clicked);
+    connect(zoomOutBtn, &QPushButton::clicked, this, &MainWindow::on_zoomOut_clicked);
     connect(rotateLeftBtn, &QPushButton::clicked, this, &MainWindow::on_rotateLeft_clicked);
     connect(rotateRightBtn, &QPushButton::clicked, this, &MainWindow::on_rotateRight_clicked);
 
@@ -679,6 +690,8 @@ void MainWindow::on_reset_clicked()
     m_currentResult = QPixmap();
     m_rotationAngle = 0;
     m_zoomFactor = 1.0;
+    ui->graphicsView_result->resetTransform();
+    ui->graphicsView_result->setDragMode(QGraphicsView::NoDrag);
     
     // 允许用户重新操作
     updateUIState(false);
@@ -866,16 +879,28 @@ void MainWindow::displayImage(const cv::Mat& image)
 
     QImage qImage(rgbImage.data, rgbImage.cols, rgbImage.rows, rgbImage.step, QImage::Format_RGB888);
     m_currentResult = QPixmap::fromImage(qImage);
-    m_rotationAngle = 0;
-    m_zoomFactor = 1.0;
 
     m_resultScene->clear();
     m_resultPixmapItem = m_resultScene->addPixmap(m_currentResult);
-    m_resultPixmapItem->setTransformOriginPoint(m_currentResult.width() / 2.0, m_currentResult.height() / 2.0);
+
+    // 场景矩形设为图片矩形（无多余边界，避免滚动条干扰）
     m_resultScene->setSceneRect(m_currentResult.rect());
-    ui->graphicsView_result->setTransformationAnchor(QGraphicsView::NoAnchor);
+
+    // 重置变换参数
+    m_rotationAngle = 0;
+    m_zoomFactor = 1.0;
+
+    // 初始 fitInView 并记录此时视图中心在场景中的位置
     ui->graphicsView_result->resetTransform();
     ui->graphicsView_result->fitInView(m_resultPixmapItem, Qt::KeepAspectRatio);
+
+    // 根据 fitInView 后的实际缩放反算 m_zoomFactor
+    QTransform fitTransform = ui->graphicsView_result->transform();
+    m_zoomFactor = fitTransform.m11();  // 假设均匀缩放
+
+    // 记录视图中心对应的场景坐标
+    m_viewCenter = ui->graphicsView_result->mapToScene(
+        ui->graphicsView_result->viewport()->rect().center());
 }
 
 void MainWindow::loadInputImages(const QString& dir)
@@ -921,87 +946,117 @@ void MainWindow::loadInputImages(const QString& dir)
     layout->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum));
 }
 
-void MainWindow::on_rotateLeft_clicked()
+void MainWindow::applyTransform()
 {
     if (!m_resultPixmapItem) return;
-    m_rotationAngle = (m_rotationAngle - 90) % 360;
+
+    // 在视图上构建变换：先缩放，再旋转
     QTransform t;
-    t.rotate(m_rotationAngle);
     t.scale(m_zoomFactor, m_zoomFactor);
-    m_resultPixmapItem->setTransform(t);
+    t.rotate(m_rotationAngle);
+    ui->graphicsView_result->setTransform(t);
+
+    // 视图中心对准 m_viewCenter（场景坐标）
+    ui->graphicsView_result->centerOn(m_viewCenter);
+}
+
+void MainWindow::on_zoomIn_clicked()
+{
+    m_zoomFactor *= 1.25;
+    m_zoomFactor = qBound(0.01, m_zoomFactor, 100.0);
+    applyTransform();
+}
+
+void MainWindow::on_zoomOut_clicked()
+{
+    m_zoomFactor /= 1.25;
+    m_zoomFactor = qBound(0.01, m_zoomFactor, 100.0);
+    applyTransform();
+}
+
+void MainWindow::on_rotateLeft_clicked()
+{
+    m_rotationAngle = (m_rotationAngle - 90) % 360;
+    applyTransform();
 }
 
 void MainWindow::on_rotateRight_clicked()
 {
-    if (!m_resultPixmapItem) return;
     m_rotationAngle = (m_rotationAngle + 90) % 360;
-    QTransform t;
-    t.rotate(m_rotationAngle);
-    t.scale(m_zoomFactor, m_zoomFactor);
-    m_resultPixmapItem->setTransform(t);
+    applyTransform();
 }
 
 bool MainWindow::eventFilter(QObject* obj, QEvent* event)
 {
-    if (obj == ui->graphicsView_result && m_resultPixmapItem) {
-        if (event->type() == QEvent::Wheel) {
-            QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
-            double angle = wheelEvent->angleDelta().y();
-            double factor = (angle > 0) ? 1.15 : 1.0 / 1.15;
-            m_zoomFactor *= factor;
-            m_zoomFactor = qBound(0.05, m_zoomFactor, 50.0);
+    if (obj != ui->graphicsView_result->viewport() || !m_resultPixmapItem)
+        return QMainWindow::eventFilter(obj, event);
 
-            // 以鼠标位置为中心缩放
-            QPointF scenePos = ui->graphicsView_result->mapToScene(wheelEvent->position().toPoint());
-            QTransform t;
-            t.rotate(m_rotationAngle);
-            t.scale(m_zoomFactor, m_zoomFactor);
-            m_resultPixmapItem->setTransform(t);
-            QPointF viewPos = ui->graphicsView_result->mapFromScene(scenePos);
-            QPointF delta = wheelEvent->position() - viewPos;
-            ui->graphicsView_result->translate(delta.x(), delta.y());
+    // 左键按下：记录位置，切换为抓手光标
+    if (event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent* me = static_cast<QMouseEvent*>(event);
+        if (me->button() == Qt::LeftButton) {
+            m_lastMousePos = me->pos();
+            ui->graphicsView_result->setCursor(Qt::ClosedHandCursor);
             return true;
         }
-        if (event->type() == QEvent::MouseButtonPress) {
-            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
-            if (mouseEvent->button() == Qt::LeftButton) {
-                m_lastMousePos = mouseEvent->pos();
-                ui->graphicsView_result->setCursor(Qt::ClosedHandCursor);
-                return true;
-            }
-            if (mouseEvent->button() == Qt::RightButton) {
-                m_lastMousePos = mouseEvent->pos();
-                return true;
-            }
-        }
-        if (event->type() == QEvent::MouseMove) {
-            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
-            if (mouseEvent->buttons() & Qt::LeftButton) {
-                QPoint delta = mouseEvent->pos() - m_lastMousePos;
-                m_lastMousePos = mouseEvent->pos();
-                ui->graphicsView_result->translate(delta.x(), delta.y());
-                return true;
-            }
-            if (mouseEvent->buttons() & Qt::RightButton) {
-                int dx = mouseEvent->pos().x() - m_lastMousePos.x();
-                m_rotationAngle = (m_rotationAngle + dx) % 360;
-                m_lastMousePos = mouseEvent->pos();
-
-                QTransform t;
-                t.rotate(m_rotationAngle);
-                t.scale(m_zoomFactor, m_zoomFactor);
-                m_resultPixmapItem->setTransform(t);
-                return true;
-            }
-        }
-        if (event->type() == QEvent::MouseButtonRelease) {
-            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
-            if (mouseEvent->button() == Qt::LeftButton) {
-                ui->graphicsView_result->setCursor(Qt::ArrowCursor);
-                return true;
-            }
+        if (me->button() == Qt::RightButton) {
+            m_lastMousePos = me->pos();
+            return true;
         }
     }
+
+    // 鼠标移动：左键拖拽平移，右键拖拽旋转
+    if (event->type() == QEvent::MouseMove) {
+        QMouseEvent* me = static_cast<QMouseEvent*>(event);
+        if (me->buttons() & Qt::LeftButton) {
+            // 将视图像素 delta 转换为场景坐标 delta
+            QPointF oldScenePos = ui->graphicsView_result->mapToScene(m_lastMousePos);
+            QPointF newScenePos = ui->graphicsView_result->mapToScene(me->pos());
+            m_viewCenter += (oldScenePos - newScenePos);
+            m_lastMousePos = me->pos();
+            applyTransform();
+            return true;
+        }
+        if (me->buttons() & Qt::RightButton) {
+            int dx = me->pos().x() - m_lastMousePos.x();
+            m_rotationAngle = (m_rotationAngle + dx) % 360;
+            m_lastMousePos = me->pos();
+            applyTransform();
+            return true;
+        }
+    }
+
+    // 左键释放：恢复光标
+    if (event->type() == QEvent::MouseButtonRelease) {
+        QMouseEvent* me = static_cast<QMouseEvent*>(event);
+        if (me->button() == Qt::LeftButton) {
+            ui->graphicsView_result->setCursor(Qt::ArrowCursor);
+            return true;
+        }
+    }
+
+    // 滚轮缩放：以鼠标位置为中心缩放
+    if (event->type() == QEvent::Wheel) {
+        QWheelEvent* we = static_cast<QWheelEvent*>(event);
+        const double factor = 1.15;
+        double oldZoom = m_zoomFactor;
+
+        if (we->angleDelta().y() > 0)
+            m_zoomFactor *= factor;
+        else
+            m_zoomFactor /= factor;
+
+        m_zoomFactor = qBound(0.01, m_zoomFactor, 100.0);
+
+        // 以鼠标位置为锚点缩放：保持鼠标下方的场景点不动
+        QPointF scenePos = ui->graphicsView_result->mapToScene(we->position().toPoint());
+        double ratio = m_zoomFactor / oldZoom;
+        m_viewCenter = scenePos + (m_viewCenter - scenePos) / ratio;
+
+        applyTransform();
+        return true;
+    }
+
     return QMainWindow::eventFilter(obj, event);
 }
 
