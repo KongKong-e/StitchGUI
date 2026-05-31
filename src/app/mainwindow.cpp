@@ -22,6 +22,8 @@
 #include <QHBoxLayout>
 #include <QStandardItemModel>
 #include <QCoreApplication>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 StitchingWorker::StitchingWorker(QObject* parent)
     : QObject(parent)
@@ -379,8 +381,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->gridLayout->setVerticalSpacing(4);
     ui->gridLayout_3->setVerticalSpacing(4);
     ui->gridLayout_4->setVerticalSpacing(4);
-    ui->horizontalLayout_main->setStretch(0, 5);
-    ui->horizontalLayout_main->setStretch(1, 7);
+    ui->horizontalLayout_main->setStretch(0, 2);
+    ui->horizontalLayout_main->setStretch(1, 5);
 
     // 右侧上下比例：待拼接图片(1) : 结果预览(3)
     ui->verticalLayout_right->setStretch(0, 1);
@@ -430,21 +432,56 @@ MainWindow::MainWindow(QWidget *parent)
     ui->graphicsView_result->setRenderHint(QPainter::SmoothPixmapTransform);
     ui->graphicsView_result->viewport()->installEventFilter(this);
 
+    // 状态指示灯 + 拼接耗时（与工具栏按钮同行）
+    m_stitchState = StateReady;
+    m_lastElapsedSec = -1;
+
+    m_statusLabel = new QLabel(this);
+    m_statusLabel->setFixedHeight(30);
+    m_statusLabel->setMinimumWidth(110);
+    m_statusLabel->setAlignment(Qt::AlignCenter);
+    m_statusLabel->setText("● 就绪");
+    m_statusLabel->setStyleSheet(
+        "QLabel { background-color: #eafaf1; border: 1px solid #27ae60; border-radius: 6px; "
+        "padding: 2px 10px; font-size: 14px; font-weight: bold; color: #27ae60; }");
+
+    m_timeLabel = new QLabel(this);
+    m_timeLabel->setFixedHeight(30);
+    m_timeLabel->setMinimumWidth(160);
+    m_timeLabel->setAlignment(Qt::AlignCenter);
+    m_timeLabel->setText("");
+    m_timeLabel->setStyleSheet(
+        "QLabel { background-color: #eef2f7; border: 1px solid #bdc3c7; border-radius: 6px; "
+        "padding: 2px 10px; font-size: 14px; font-weight: bold; color: #2c3e50; }");
+
     // 工具栏按钮（居中）：放大、缩小、左旋、右旋
-    QPushButton* zoomInBtn = new QPushButton("放大", this);
-    QPushButton* zoomOutBtn = new QPushButton("缩小", this);
-    QPushButton* rotateLeftBtn = new QPushButton("左旋90°", this);
-    QPushButton* rotateRightBtn = new QPushButton("右旋90°", this);
+    QString btnStyle =
+        "QPushButton { font-size: 18px; min-width: 32px; max-width: 32px; min-height: 30px; max-height: 30px; "
+        "border: 1px solid #bdc3c7; border-radius: 4px; background-color: #f8f9fa; }"
+        "QPushButton:hover { background-color: #e8ecef; border-color: #95a5a6; }"
+        "QPushButton:pressed { background-color: #d5dbdb; }";
+
+    QPushButton* zoomInBtn = new QPushButton("＋", this);
+    QPushButton* zoomOutBtn = new QPushButton("－", this);
+    QPushButton* rotateLeftBtn = new QPushButton("↺", this);
+    QPushButton* rotateRightBtn = new QPushButton("↻", this);
+    zoomInBtn->setStyleSheet(btnStyle);
+    zoomOutBtn->setStyleSheet(btnStyle);
+    rotateLeftBtn->setStyleSheet(btnStyle);
+    rotateRightBtn->setStyleSheet(btnStyle);
+
     QHBoxLayout* toolbarLayout = new QHBoxLayout();
+    toolbarLayout->addWidget(m_statusLabel);
     toolbarLayout->addStretch();
     toolbarLayout->addWidget(zoomInBtn);
-    toolbarLayout->addSpacing(6);
+    toolbarLayout->addSpacing(4);
     toolbarLayout->addWidget(zoomOutBtn);
-    toolbarLayout->addSpacing(16);
+    toolbarLayout->addSpacing(12);
     toolbarLayout->addWidget(rotateLeftBtn);
-    toolbarLayout->addSpacing(6);
+    toolbarLayout->addSpacing(4);
     toolbarLayout->addWidget(rotateRightBtn);
     toolbarLayout->addStretch();
+    toolbarLayout->addWidget(m_timeLabel);
     ui->verticalLayout_2->insertLayout(0, toolbarLayout);
     connect(zoomInBtn, &QPushButton::clicked, this, &MainWindow::on_zoomIn_clicked);
     connect(zoomOutBtn, &QPushButton::clicked, this, &MainWindow::on_zoomOut_clicked);
@@ -644,6 +681,8 @@ void MainWindow::on_startStitching_clicked()
 
     updateUIState(true);
     ui->progressBar->setValue(0);
+    m_elapsedTimer.start();
+    setStatusIndicator(StateProcessing);
 
     m_workerThread = new QThread(this);
     m_worker = new StitchingWorker();
@@ -730,7 +769,11 @@ void MainWindow::on_reset_clicked()
     
     // 重置进度条
     ui->progressBar->setValue(0);
-    
+
+    // 重置状态指示灯
+    m_lastElapsedSec = -1;
+    setStatusIndicator(StateReady);
+
     // 重置结果显示
     m_resultScene->clear();
     m_resultPixmapItem = nullptr;
@@ -888,14 +931,19 @@ void MainWindow::on_stitchingLog(const QString& message)
 
 void MainWindow::on_stitchingResult(const cv::Mat& result)
 {
+    double elapsed = m_elapsedTimer.elapsed() / 1000.0;
+    setStatusIndicator(StateSuccess, elapsed);
     displayImage(result);
-    appendLog(QString("%1 拼接结果已显示").arg(m_currentRunTag));
+    generateReport(elapsed);
+    appendLog(QString("%1 拼接结果已显示，耗时 %2s").arg(m_currentRunTag).arg(elapsed, 0, 'f', 2));
 }
 
 void MainWindow::on_stitchingError(const QString& error)
 {
+    double elapsed = m_elapsedTimer.elapsed() / 1000.0;
+    setStatusIndicator(StateError, elapsed);
     QMessageBox::critical(this, "错误", error);
-    appendLog(QString("%1 错误: %2").arg(m_currentRunTag, error));
+    appendLog(QString("%1 错误: %2，耗时 %3s").arg(m_currentRunTag, error).arg(elapsed, 0, 'f', 2));
     ui->statusbar->showMessage("拼接失败，请检查参数和日志");
     updateUIState(false);
 }
@@ -1005,6 +1053,89 @@ void MainWindow::applyTransform()
 
     // 视图中心对准 m_viewCenter（场景坐标）
     ui->graphicsView_result->centerOn(m_viewCenter);
+}
+
+void MainWindow::setStatusIndicator(StitchState state, double elapsedSec)
+{
+    m_stitchState = state;
+    if (elapsedSec >= 0)
+        m_lastElapsedSec = elapsedSec;
+
+    QString text, bg, border, color;
+    switch (state) {
+    case StateReady:
+        text = "● 就绪";   bg = "#eafaf1"; border = "#27ae60"; color = "#27ae60"; break;
+    case StateProcessing:
+        text = "● 拼接中"; bg = "#fef9e7"; border = "#f39c12"; color = "#f39c12"; break;
+    case StateSuccess:
+        text = "● 完成";   bg = "#eafaf1"; border = "#27ae60"; color = "#27ae60"; break;
+    case StateError:
+        text = "● 失败";   bg = "#fdedec"; border = "#e74c3c"; color = "#e74c3c"; break;
+    }
+    m_statusLabel->setText(text);
+    m_statusLabel->setStyleSheet(
+        QString("QLabel { background-color: %1; border: 1.5px solid %2; border-radius: 6px; "
+                "padding: 2px 10px; font-size: 14px; font-weight: bold; color: %3; }")
+        .arg(bg, border, color));
+
+    if (m_lastElapsedSec >= 0 && state != StateProcessing)
+        m_timeLabel->setText(QString("⏱ 耗时 %1 s").arg(m_lastElapsedSec, 0, 'f', 2));
+    else if (state == StateProcessing)
+        m_timeLabel->setText("⏱ 计时中...");
+    else
+        m_timeLabel->setText("");
+}
+
+
+void MainWindow::generateReport(double elapsedSec)
+{
+    QStringList detectors = {"superpoint", "sift", "orb", "surf"};
+    QStringList matchers = {"lightglue", "bfmatcher"};
+    QStringList modes = {"panorama", "scans"};
+    QStringList directions = {"auto", "horiz", "vert"};
+
+    QJsonObject input;
+    input["文件夹"] = ui->lineEdit_imageDir->text();
+    input["图片数量"] = ui->hLayout_inputImages->count() - 1;
+
+    QJsonObject params;
+    params["特征检测器"] = detectors[ui->comboBox_detector->currentIndex()];
+    params["特征匹配器"] = matchers[ui->comboBox_matcher->currentIndex()];
+    params["拼接模式"] = modes[ui->comboBox_mode->currentIndex()];
+    params["拼接方向"] = directions[ui->comboBox_direction->currentIndex()];
+    params["匹配阈值"] = ui->doubleSpinBox_matchThreshold->value();
+    params["置信度阈值"] = ui->doubleSpinBox_confidenceThreshold->value();
+    params["保存匹配图"] = ui->checkBox_showMatching->isChecked();
+
+    QJsonObject output;
+    output["文件夹"] = ui->lineEdit_outputDir->text();
+    output["结果文件"] = ui->lineEdit_outputName->text();
+
+    QJsonObject result;
+    result["状态"] = "成功";
+    result["耗时_秒"] = elapsedSec;
+
+    QJsonObject report;
+    report["拼接报告"] = "SuperStitch 自动生成";
+    report["生成时间"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+    report["输入"] = input;
+    report["算法参数"] = params;
+    report["输出"] = output;
+    report["结果"] = result;
+
+    QString tag = buildOutputTag();
+    QString baseDir = ui->lineEdit_imageDir->text();
+    QString reportPath = baseDir + "/" + tag + "/" + tag + ".json";
+
+    QFile file(reportPath);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QJsonDocument doc(report);
+        file.write(doc.toJson(QJsonDocument::Indented));
+        file.close();
+        appendLog("拼接报告已保存: " + reportPath);
+    } else {
+        appendLog("警告: 无法保存拼接报告: " + reportPath);
+    }
 }
 
 void MainWindow::on_zoomIn_clicked()

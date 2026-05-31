@@ -7,6 +7,8 @@
 #include <QDialog>
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
+#include <QElapsedTimer>
+#include <QLabel>
 #include <opencv2/opencv.hpp>
 #include "superpoint.h"
 #include "lightglue.h"
@@ -137,6 +139,16 @@ private:
     double m_zoomFactor;
     QPoint m_lastMousePos;
     QPointF m_viewCenter;  // 视图中心在场景坐标系中的位置（用于平移/旋转/缩放）
+
+    // 状态指示灯与耗时
+    enum StitchState { StateReady, StateProcessing, StateSuccess, StateError };
+    void setStatusIndicator(StitchState state, double elapsedSec = -1);
+    void generateReport(double elapsedSec);
+    StitchState m_stitchState;
+    QElapsedTimer m_elapsedTimer;
+    double m_lastElapsedSec;
+    QLabel* m_statusLabel;
+    QLabel* m_timeLabel;
 
     bool eventFilter(QObject* obj, QEvent* event) override;
 };
