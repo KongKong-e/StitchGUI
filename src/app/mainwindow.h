@@ -125,6 +125,9 @@ private:
     // 输入图片预览
     void loadInputImages(const QString& dir);
 
+    // 根据当前参数生成输出标签，如 sp_lg_pano_mt0.3_ct0.5
+    QString buildOutputTag() const;
+
     // 结果预览缩放/旋转
     void applyTransform();
     QGraphicsScene* m_resultScene;

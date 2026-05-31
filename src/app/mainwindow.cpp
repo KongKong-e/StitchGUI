@@ -217,7 +217,7 @@ void StitchingWorker::process()
                         DstresizedImage, dstFeature.keypoints,
                         matches[i].matches, imgMatches);
 
-                    std::string matchPath = resDir + "/matching_" + std::to_string(matches[i].src_img_idx) +
+                    std::string matchPath = resDir + "/match_" + std::to_string(matches[i].src_img_idx) +
                         std::string("_") + std::to_string(matches[i].dst_img_idx) + ".jpg";
                     cv::imwrite(matchPath, imgMatches);
                     emit logMessage("保存匹配结果: " + QString::fromStdString(matchPath));
@@ -484,6 +484,20 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
 
+    // 检测器/匹配器/模式/阈值变化时，自动刷新输出路径
+    auto refreshOutputTag = [this]() {
+        QString baseDir = ui->lineEdit_imageDir->text();
+        if (baseDir.isEmpty()) return;
+        QString tag = buildOutputTag();
+        ui->lineEdit_outputDir->setText(baseDir + "/" + tag);
+        ui->lineEdit_outputName->setText(tag + ".jpg");
+    };
+    connect(ui->comboBox_detector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, refreshOutputTag);
+    connect(ui->comboBox_matcher, QOverload<int>::of(&QComboBox::currentIndexChanged), this, refreshOutputTag);
+    connect(ui->comboBox_mode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, refreshOutputTag);
+    connect(ui->doubleSpinBox_matchThreshold, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, refreshOutputTag);
+    connect(ui->doubleSpinBox_confidenceThreshold, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, refreshOutputTag);
+
     appendLog("SuperStitch GUI 已启动");
 }
 
@@ -508,6 +522,29 @@ void MainWindow::initializeConnections()
     connect(ui->action_about, &QAction::triggered, this, &MainWindow::on_about_triggered);
 }
 
+QString MainWindow::buildOutputTag() const
+{
+    // 检测器缩写
+    static const char* detAbbrev[] = {"sp", "sift", "orb", "surf"};
+    // 匹配器缩写
+    static const char* matchAbbrev[] = {"lg", "bf"};
+    // 模式缩写
+    static const char* modeAbbrev[] = {"pano", "scan"};
+
+    int detIdx = ui->comboBox_detector->currentIndex();
+    int matchIdx = ui->comboBox_matcher->currentIndex();
+    int modeIdx = ui->comboBox_mode->currentIndex();
+    float mt = static_cast<float>(ui->doubleSpinBox_matchThreshold->value());
+    float ct = static_cast<float>(ui->doubleSpinBox_confidenceThreshold->value());
+
+    return QString("%1_%2_%3_mt%4_ct%5")
+        .arg(detAbbrev[detIdx])
+        .arg(matchAbbrev[matchIdx])
+        .arg(modeAbbrev[modeIdx])
+        .arg(mt, 0, 'g', 2)
+        .arg(ct, 0, 'g', 2);
+}
+
 void MainWindow::on_browseImageDir_clicked()
 {
     QString dir = QFileDialog::getExistingDirectory(this, "选择图像文件夹", "");
@@ -515,10 +552,11 @@ void MainWindow::on_browseImageDir_clicked()
         ui->lineEdit_imageDir->setText(dir);
         appendLog("选择图像文件夹: " + dir);
 
-        // 默认将输出文件夹设置为图像文件夹下的 stitchGUI 目录
-        QString defaultOutputDir = dir + "/stitchGUI";
+        // 根据当前算法参数自动生成输出文件夹名
+        QString tag = buildOutputTag();
+        QString defaultOutputDir = dir + "/" + tag;
         ui->lineEdit_outputDir->setText(defaultOutputDir);
-        ui->lineEdit_outputName->setText(QFileInfo(defaultOutputDir).fileName() + ".jpg");
+        ui->lineEdit_outputName->setText(tag + ".jpg");
     }
 }
 
@@ -627,6 +665,15 @@ void MainWindow::on_startStitching_clicked()
 
     float matchThreshold = ui->doubleSpinBox_matchThreshold->value();
     float confidenceThreshold = ui->doubleSpinBox_confidenceThreshold->value();
+    // 根据当前参数刷新输出目录和文件名，确保名称反映实际使用的参数
+    QString tag = buildOutputTag();
+    QString baseDir = ui->lineEdit_imageDir->text();
+    if (!baseDir.isEmpty()) {
+        QString autoDir = baseDir + "/" + tag;
+        ui->lineEdit_outputDir->setText(autoDir);
+        ui->lineEdit_outputName->setText(tag + ".jpg");
+    }
+
     std::string outputDir = ui->lineEdit_outputDir->text().toStdString();
     std::string outputName = ui->lineEdit_outputName->text().toStdString();
     bool saveMatching = ui->checkBox_showMatching->isChecked();

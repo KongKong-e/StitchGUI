@@ -1,5 +1,6 @@
 #pragma warning(disable:4996)
 
+#include <cstring>
 #include <vector>
 #include <map>
 #include <opencv2/opencv.hpp>
@@ -27,81 +28,73 @@ void LightGlue::match(
 	MatchesInfo& matches_info)
 {
 	static Ort::Env env(ORT_LOGGING_LEVEL_FATAL, "LightGlue");
-	static Ort::SessionOptions sessionOptions;
 	static std::map<std::wstring, Ort::Session*> sessions;
-	
+
 	if (sessions.find(this->m_modelPath) == sessions.end())
 	{
-		sessionOptions.SetIntraOpNumThreads(1);
+		Ort::SessionOptions sessionOptions;
+		sessionOptions.SetIntraOpNumThreads(4);
 		sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-		
+
 		// 在 Windows 上直接使用宽字符路径，避免编码转换导致的乱码问题
 		sessions[this->m_modelPath] = new Ort::Session(env, this->m_modelPath.c_str(), sessionOptions);
 	}
 	Ort::Session* lightglueSession = sessions[this->m_modelPath];
-	
-	std::vector<float>kp1;
-	kp1.resize(features1.keypoints.size() * 2);
-	std::vector<float>kp2;
-	kp2.resize(features2.keypoints.size() * 2);
+
+	// 归一化关键点坐标
+	int n1 = static_cast<int>(features1.keypoints.size());
+	int n2 = static_cast<int>(features2.keypoints.size());
+
+	std::vector<float> kp1(n1 * 2);
+	std::vector<float> kp2(n2 * 2);
 
 	float f1wid = features1.img_size.width / 2.0f;
-
 	float f1hei = features1.img_size.height / 2.0f;
-
-	for (int i = 0; i < features1.keypoints.size(); i++)
+	for (int i = 0; i < n1; i++)
 	{
-		kp1[2 * i] = (features1.keypoints[i].pt.x - f1wid) / f1wid;
+		kp1[2 * i]     = (features1.keypoints[i].pt.x - f1wid) / f1wid;
 		kp1[2 * i + 1] = (features1.keypoints[i].pt.y - f1hei) / f1hei;
 	}
 
 	float f2wid = features2.img_size.width / 2.0f;
 	float f2hei = features2.img_size.height / 2.0f;
-	for (int i = 0; i < features2.keypoints.size(); i++)
+	for (int i = 0; i < n2; i++)
 	{
-		kp2[2 * i] = (features2.keypoints[i].pt.x - f2wid) / f2wid;
+		kp2[2 * i]     = (features2.keypoints[i].pt.x - f2wid) / f2wid;
 		kp2[2 * i + 1] = (features2.keypoints[i].pt.y - f2hei) / f2hei;
 	}
 
-	std::vector<float>des1;
-	des1.resize(features1.keypoints.size() * 256);
-
+	// 直接从 cv::Mat 连续内存拷贝描述子，避免逐元素 at<>() 开销
 	cv::Mat des1mat = features1.descriptors.getMat(cv::ACCESS_READ);
-
-	for (int w = 0; w < des1mat.cols; w++)
-	{
+	int descCols = des1mat.cols;
+	std::vector<float> des1(n1 * descCols);
+	if (des1mat.isContinuous()) {
+		memcpy(des1.data(), des1mat.data, n1 * descCols * sizeof(float));
+	} else {
 		for (int h = 0; h < des1mat.rows; h++)
-		{
-			int index = h * features1.descriptors.cols + w;
-			des1[index] = des1mat.at<float>(h, w);
-		}
+			memcpy(des1.data() + h * descCols, des1mat.ptr<float>(h), descCols * sizeof(float));
 	}
 
-	std::vector<float>des2;
-	des2.resize(features2.keypoints.size() * 256);
-
 	cv::Mat des2mat = features2.descriptors.getMat(cv::ACCESS_READ);
-
-	for (int w = 0; w < des2mat.cols; w++)
-	{
+	std::vector<float> des2(n2 * descCols);
+	if (des2mat.isContinuous()) {
+		memcpy(des2.data(), des2mat.data, n2 * descCols * sizeof(float));
+	} else {
 		for (int h = 0; h < des2mat.rows; h++)
-		{
-			int index = h * features2.descriptors.cols + w;
-			des2[index] = des2mat.at<float>(h, w);
-		}
+			memcpy(des2.data() + h * descCols, des2mat.ptr<float>(h), descCols * sizeof(float));
 	}
 
 	const char* input_names[] = { "kpts0", "kpts1", "desc0", "desc1" };
 	Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
 
 	std::vector<Ort::Value> inputTensor;
-	std::vector<int64_t> kp1Shape{ 1,(int64_t)features1.keypoints.size(), 2 };
+	std::vector<int64_t> kp1Shape{ 1, n1, 2 };
 	inputTensor.emplace_back(Ort::Value::CreateTensor<float>(memoryInfo, kp1.data(), kp1.size(), kp1Shape.data(), kp1Shape.size()));
-	std::vector<int64_t> kp2Shape{ 1,(int64_t)features2.keypoints.size(), 2 };
+	std::vector<int64_t> kp2Shape{ 1, n2, 2 };
 	inputTensor.emplace_back(Ort::Value::CreateTensor<float>(memoryInfo, kp2.data(), kp2.size(), kp2Shape.data(), kp2Shape.size()));
-	std::vector<int64_t> des1Shape{ 1,(int64_t)features1.keypoints.size(), features1.descriptors.cols };
+	std::vector<int64_t> des1Shape{ 1, n1, descCols };
 	inputTensor.emplace_back(Ort::Value::CreateTensor<float>(memoryInfo, des1.data(), des1.size(), des1Shape.data(), des1Shape.size()));
-	std::vector<int64_t> des2Shape{ 1,(int64_t)features2.keypoints.size(), features2.descriptors.cols };
+	std::vector<int64_t> des2Shape{ 1, n2, descCols };
 	inputTensor.emplace_back(Ort::Value::CreateTensor<float>(memoryInfo, des2.data(), des2.size(), des2Shape.data(), des2Shape.size()));
 	const char* output_names[] = { "matches0","matches1","mscores0","mscores1" };
 	Ort::RunOptions run_options;
