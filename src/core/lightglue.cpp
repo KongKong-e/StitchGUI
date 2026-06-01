@@ -183,6 +183,9 @@ void LightGlue::match(
 	}
 	else if (this->m_mode == cv::Stitcher::PANORAMA)
 	{
+		if (matches_info.matches.size() < 4)
+			return;
+
 		for (size_t i = 0; i < matches_info.matches.size(); ++i)
 		{
 			const cv::DMatch& m = matches_info.matches[i];
