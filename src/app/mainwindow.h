@@ -97,6 +97,8 @@ private slots:
     void on_openImages_triggered();
     void on_exit_triggered();
     void on_operationGuide_triggered();
+    void on_errorGuide_triggered();
+    void on_paramGuide_triggered();
     void on_about_triggered();
     void on_modelSettings_triggered();
     void on_zoomIn_clicked();

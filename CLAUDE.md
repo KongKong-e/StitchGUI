@@ -92,18 +92,50 @@
 ```
 读取图像 → 创建检测器 → 创建匹配器
 → cv::Stitcher::create() → setFeaturesFinder/setFeaturesMatcher
-→ stitcher->stitch(imgs, pano) → 保存结果
+→ stitcher->stitch(imgs, pano) → 保存结果 → 生成报告
 ```
+
+### 输出命名规则
+
+输出文件夹和文件名按 `{检测器}_{匹配器}_{模式}_mt{匹配阈值}_ct{置信度}` 格式自动生成，例如 `sp_lg_pano_mt0.3_ct0.5`。缩写对照：
+
+| 缩写 | 含义 | 缩写 | 含义 |
+|------|------|------|------|
+| sp | SuperPoint | lg | LightGlue |
+| sift | SIFT | bf | BFMatcher |
+| orb | ORB | pano | Panorama |
+| surf | SURF | scan | Scans |
+
+输出目录结构：
+```
+sp_lg_pano_mt0.3_ct0.5/
+  sp_lg_pano_mt0.3_ct0.5.jpg   # 拼接结果
+  sp_lg_pano_mt0.3_ct0.5.json  # 拼接报告 (JSON)
+  match_0_1.jpg                 # 匹配中间图 (可选)
+```
+
+### 状态指示与报告
+
+- 工具栏左侧有红绿灯状态指示（绿=就绪/完成，黄=拼接中，红=失败）
+- 工具栏右侧显示拼接耗时（秒，小数点后两位）
+- 拼接成功时自动在输出文件夹生成 JSON 格式报告（含算法参数、耗时、输入输出信息，中文键名）
 
 ## 常见注意事项
 
+- **SURF detect→compute 缓存**：`cv::Stitcher` 先对所有图像调用 `detect()` 再调用 `compute()`，`SurfDetector` 通过图像哈希缓存灰度图和关键点，确保 compute 使用与 detect 相同的坐标空间
 - **SURF 描述子是 CV_32F 浮点型**，ClassicalMatcher 使用 BFMatcher + L2 距离匹配（FLANN KD-tree 在部分 OpenCV 构建中会导致堆损坏）
 - **surf_wrapper.cpp 不编译 parallelsurf/*.cpp**，所有实现合并到 Surf.cpp
 - **ParallelSURF 的 Image 对象不能浅拷贝**，Surf 类通过参数传递 Image 引用而非存储成员
 - **模型文件在 .gitignore 中**，构建时通过 .pro 的 post-link 自动从 `model/` 复制到输出目录
 - **模型路径使用 `QCoreApplication::applicationDirPath()`**，自动适配构建/部署目录
+- **LightGlue ONNX 推理线程数**：`SetIntraOpNumThreads(4)`，sessionOptions 在 if 块内创建（非 static）
 
-## 待做功能（算法功能完备后再实现）
+## 待解决问题
 
-- **批量拼接/任务队列**：支持多个文件夹排队拼接，无需逐个手动操作
-- **结果缩放/平移查看**：大尺寸全景图支持鼠标滚轮缩放和拖拽平移查看细节
+-按理说scan效果会更好，但实际效果却更差
+-orb优化
+-拼接速度优化
+-sp+lg报错解决（dji）
+-批处理脚本
+
+

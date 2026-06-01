@@ -4,11 +4,15 @@
 
 ## 功能
 
-- 基于 OpenCV `cv::Stitcher` 的全景图像拼接
+- 基于 OpenCV `cv::Stitcher` 的全景图像拼接（Panorama / Scans 模式）
 - 4 种特征检测器：SuperPoint、SIFT、ORB、SURF
 - 2 种特征匹配器：LightGlue（深度学习）、BFMatcher（经典方法）
 - 支持图像分割模式和匹配结果可视化
 - Qt 6 图形界面，异步拼接不阻塞 UI
+- 结果预览：滚轮缩放、拖拽平移、旋转查看
+- 拼接状态指示灯（红绿灯）+ 实时耗时显示
+- 智能输出命名：文件夹/文件名自动编码算法参数
+- 拼接报告：JSON 格式自动生成，含算法参数和耗时
 
 ## 依赖
 

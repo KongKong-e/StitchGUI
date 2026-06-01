@@ -84,7 +84,7 @@ cv::Ptr<cv::Feature2D> StitchingWorker::createDetector()
     else if (m_detector == "sift")
         return cv::SIFT::create();
     else if (m_detector == "orb")
-        return cv::ORB::create();
+        return cv::ORB::create(1000);
     else if (m_detector == "surf")
         return cv::makePtr<SurfDetector>();
     throw std::runtime_error("不支持的检测器: " + m_detector);
@@ -411,6 +411,14 @@ MainWindow::MainWindow(QWidget *parent)
     QAction* operationGuideAction = new QAction("操作指南", this);
     ui->menu_2->insertAction(ui->action_about, operationGuideAction);
     connect(operationGuideAction, &QAction::triggered, this, &MainWindow::on_operationGuide_triggered);
+
+    QAction* errorGuideAction = new QAction("报错说明", this);
+    ui->menu_2->insertAction(ui->action_about, errorGuideAction);
+    connect(errorGuideAction, &QAction::triggered, this, &MainWindow::on_errorGuide_triggered);
+
+    QAction* paramGuideAction = new QAction("参数说明", this);
+    ui->menu_2->insertAction(ui->action_about, paramGuideAction);
+    connect(paramGuideAction, &QAction::triggered, this, &MainWindow::on_paramGuide_triggered);
     
     // 预设模型路径（相对于可执行文件目录）
     QString appDir = QCoreApplication::applicationDirPath();
@@ -907,6 +915,174 @@ void MainWindow::on_operationGuide_triggered()
 
     connect(closeButton, &QPushButton::clicked, &guideDialog, &QDialog::accept);
     guideDialog.exec();
+}
+
+void MainWindow::on_errorGuide_triggered()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("报错说明");
+    dialog.resize(800, 620);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
+    QTextBrowser* viewer = new QTextBrowser(&dialog);
+    viewer->setOpenExternalLinks(true);
+    viewer->setStyleSheet(
+        "QTextBrowser {"
+        "  background: #ffffff;"
+        "  border: 1px solid #d7dde7;"
+        "  border-radius: 8px;"
+        "  padding: 12px;"
+        "  line-height: 1.6;"
+        "}"
+    );
+
+    viewer->setHtml(
+        "<h2 style='color:#1f2937;'>拼接报错说明</h2>"
+        "<p style='color:#6b7280;'>以下列出了所有可能的报错信息、触发原因及解决建议。</p>"
+
+        "<h3 style='color:#dc2626;'>❶ 未找到任何图像文件</h3>"
+        "<p><b>原因：</b>指定目录下没有符合扩展名的图像文件。</p>"
+        "<ul>"
+        "<li>扩展名不匹配（如实际是 <code>.JPG</code> 但填写了 <code>*.jpg</code>）</li>"
+        "<li>目录路径错误或目录为空</li>"
+        "</ul>"
+        "<p><b>解决：</b>检查图像目录和扩展名设置，确认文件存在。</p>"
+
+        "<h3 style='color:#dc2626;'>❷ 需要更多图像</h3>"
+        "<p><b>原因：</b>图像之间特征匹配不足，拼接器无法建立有效的图像连接关系。</p>"
+        "<ul>"
+        "<li>相邻图像重叠区域太小（建议重叠 30% 以上）</li>"
+        "<li>图像纹理过于单一（如纯色天空、水面），特征点太少</li>"
+        "<li>匹配器阈值过于严格，丢弃了过多匹配</li>"
+        "</ul>"
+        "<p><b>解决：</b>增加图像重叠度，或降低匹配阈值（matchThreshold）重试。</p>"
+
+        "<h3 style='color:#dc2626;'>❸ 单应性矩阵估计失败</h3>"
+        "<p><b>原因：</b>两幅图像之间的特征匹配无法求出有效的 Homography 矩阵。</p>"
+        "<ul>"
+        "<li><b>匹配外点（outlier）过多：</b>正确匹配少于 4 对，RANSAC 无法收敛。ORB 二进制描述子区分度低，更容易出现此问题</li>"
+        "<li><b>匹配点共线退化：</b>所有匹配点近似分布在一条直线上，矩阵奇异</li>"
+        "<li><b>图像间变换过大：</b>超出单应性模型的适用范围（如拍摄角度差异 > 30°）</li>"
+        "</ul>"
+        "<p><b>解决：</b>更换为 SIFT 或 SuperPoint 检测器，或增加图像数量和重叠度。</p>"
+
+        "<h3 style='color:#dc2626;'>❹ 相机参数调整失败</h3>"
+        "<p><b>原因：</b>Bundle Adjustment（光束法平差）优化不收敛。</p>"
+        "<p>拼接流程为：特征匹配 → 单应性估计 → 分解为相机焦距/旋转 → 优化重投影误差。</p>"
+        "<ul>"
+        "<li><b>上游匹配质量差：</b>Homography 不准确 → 分解出的初始焦距为负数或 NaN → 优化从坏起点出发，无法收敛</li>"
+        "<li><b>图像间纯平移：</b>无法估计焦距，参数退化</li>"
+        "<li><b>数值不稳定：</b>旋转矩阵失去正交性</li>"
+        "</ul>"
+        "<p><b>解决：</b>这是匹配质量差的连锁反应。优先改善匹配（换检测器/调阈值），而非调整相机参数。</p>"
+
+        "<h3 style='color:#dc2626;'>❺ 未知错误 / 异常</h3>"
+        "<p><b>原因：</b>程序捕获到 C++ 异常。</p>"
+        "<ul>"
+        "<li><b>ONNX 推理失败：</b>模型文件损坏、路径含中文、输入维度不匹配</li>"
+        "<li><b>内存不足：</b>图像分辨率过高，拼接过程内存耗尽</li>"
+        "<li><b>OpenCV 内部异常：</b>矩阵运算维度不匹配、空矩阵操作</li>"
+        "</ul>"
+        "<p><b>解决：</b>查看日志中的异常信息，检查模型文件和图像尺寸。</p>"
+
+        "<hr style='margin:16px 0;'>"
+    );
+
+    QPushButton* closeBtn = new QPushButton("关闭", &dialog);
+    closeBtn->setMinimumWidth(100);
+    QHBoxLayout* btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+    btnLayout->addWidget(closeBtn);
+    mainLayout->addWidget(viewer);
+    mainLayout->addLayout(btnLayout);
+
+    connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+    dialog.exec();
+}
+
+void MainWindow::on_paramGuide_triggered()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("参数说明");
+    dialog.resize(780, 580);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
+    QTextBrowser* viewer = new QTextBrowser(&dialog);
+    viewer->setOpenExternalLinks(true);
+    viewer->setStyleSheet(
+        "QTextBrowser {"
+        "  background: #ffffff;"
+        "  border: 1px solid #d7dde7;"
+        "  border-radius: 8px;"
+        "  padding: 12px;"
+        "  line-height: 1.6;"
+        "}"
+    );
+
+    viewer->setHtml(
+        "<h2 style='color:#1f2937;'>参数说明</h2>"
+
+        "<h3 style='color:#2563eb;'>图像设置</h3>"
+        "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+        "<tr><td><b>图像目录</b></td><td>待拼接图像所在的文件夹路径</td></tr>"
+        "<tr><td><b>文件扩展名</b></td><td>图像过滤格式，如 <code>*.jpg</code>、<code>*.png</code></td></tr>"
+        "<tr><td><b>分割图像</b></td><td>将每张输入图像水平切分为三份再拼接，适用于单张宽幅扫描图</td></tr>"
+        "</table>"
+
+        "<h3 style='color:#2563eb;'>拼接参数</h3>"
+        "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+        "<tr><td><b>特征检测器</b></td>"
+        "<td><b>SuperPoint</b> — 深度学习，精度最高，需 ONNX 模型<br>"
+        "<b>SIFT</b> — 经典算法，鲁棒性好，速度适中<br>"
+        "<b>ORB</b> — 二进制描述子，速度最快，精度最低<br>"
+        "<b>SURF</b> — Haar 小波特征，速度快于 SIFT</td></tr>"
+        "<tr><td><b>特征匹配器</b></td>"
+        "<td><b>LightGlue</b> — 深度学习匹配，仅配合 SuperPoint 使用<br>"
+        "<b>BFMatcher</b> — 暴力匹配 + Lowe's 比率测试，适用于所有检测器</td></tr>"
+        "<tr><td><b>拼接模式</b></td>"
+        "<td><b>Panorama</b> — 全景模式，使用 Homography 变换（适用于旋转拍摄）<br>"
+        "<b>Scans</b> — 扫描模式，使用仿射变换（适用于平面扫描件）</td></tr>"
+        "<tr><td><b>拼接方向</b></td>"
+        "<td><b>自动</b> — 由算法自动判断<br>"
+        "<b>水平</b> — 强制水平拼接（左右排列）<br>"
+        "<b>垂直</b> — 强制垂直拼接（上下排列）</td></tr>"
+        "<tr><td><b>匹配阈值</b></td>"
+        "<td>范围 0~1，默认 0.6。控制特征匹配的筛选严格程度。<br>"
+        "值越大，匹配条件越宽松，匹配数量越多但误匹配也越多。<br>"
+        "建议：SuperPoint 0.3~0.5，SIFT/SURF 0.5~0.7，ORB 0.6~0.8</td></tr>"
+        "<tr><td><b>置信度阈值</b></td>"
+        "<td>范围 0~1，默认 0.2。控制图像对是否参与拼接的最低可信度。<br>"
+        "值越大，要求匹配质量越高，低质量图像对会被排除。<br>"
+        "建议：一般保持默认 0.1~0.3 即可</td></tr>"
+        "</table>"
+
+        "<h3 style='color:#2563eb;'>输出设置</h3>"
+        "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+        "<tr><td><b>输出文件夹</b></td><td>拼接结果保存目录，会根据算法参数自动生成</td></tr>"
+        "<tr><td><b>输出文件名</b></td><td>拼接结果的文件名，格式如 <code>sp_lg_pano_mt0.3_ct0.2.jpg</code></td></tr>"
+        "<tr><td><b>保存匹配图</b></td><td>勾选后会在输出目录保存每对图像的特征匹配可视化图（match_0_1.jpg）</td></tr>"
+        "</table>"
+
+        "<h3 style='color:#2563eb;'>输出命名规则</h3>"
+        "<p>文件夹和文件名自动按 <code>{检测器}_{匹配器}_{模式}_mt{匹配阈值}_ct{置信度}</code> 格式生成：</p>"
+        "<table cellpadding='4' cellspacing='0'>"
+        "<tr><td>sp</td><td>SuperPoint</td><td>sift</td><td>SIFT</td></tr>"
+        "<tr><td>orb</td><td>ORB</td><td>surf</td><td>SURF</td></tr>"
+        "<tr><td>lg</td><td>LightGlue</td><td>bf</td><td>BFMatcher</td></tr>"
+        "<tr><td>pano</td><td>Panorama</td><td>scan</td><td>Scans</td></tr>"
+        "</table>"
+    );
+
+    QPushButton* closeBtn = new QPushButton("关闭", &dialog);
+    closeBtn->setMinimumWidth(100);
+    QHBoxLayout* btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
+    btnLayout->addWidget(closeBtn);
+    mainLayout->addWidget(viewer);
+    mainLayout->addLayout(btnLayout);
+
+    connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+    dialog.exec();
 }
 
 void MainWindow::on_stitchingFinished()
