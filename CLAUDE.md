@@ -132,9 +132,8 @@ sp_lg_pano_mt0.3_ct0.5/
 
 ## 待解决问题
 
--按理说scan效果会更好，但实际效果却更差
--拼接速度优化
--sp+lg报错解决（dji）
+-GPU（装 CUDA Toolkit 12.x）
+-文件自动命名/系统名字（PVStitch）
+-英文
 -批处理脚本
-
 

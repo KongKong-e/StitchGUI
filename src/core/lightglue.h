@@ -27,6 +27,9 @@ protected:
 
 	float m_matchThresh = 0.0;
 
+	bool m_useGpu = false;
+	bool m_gpuActive = false;
+
 	CV_WRAP_AS(apply) void operator ()(
 		const ImageFeatures& features1,
 		const ImageFeatures& features2,
@@ -43,7 +46,8 @@ public:
 	LightGlue(
 		std::wstring modelPath,
 		cv::Stitcher::Mode mode,
-		float matchThresh);
+		float matchThresh,
+		bool useGpu = false);
 
 	void match(
 		const ImageFeatures& features1,
@@ -60,5 +64,8 @@ public:
 	{
 		return pairwise_matches_;
 	};
+
+	// 实际是否使用 GPU（session 创建后才准确）
+	bool isUsingGpu() const { return m_gpuActive; }
 
 };

@@ -122,14 +122,21 @@
            </item>
           </widget>
          </item>
-         <item row="2" column="0">
+         <item row="2" column="0" colspan="2">
+          <widget class="QCheckBox" name="checkBox_gpu">
+           <property name="text">
+            <string>LightGlue使用GPU加速（需NVIDIA显卡）</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
           <widget class="QLabel" name="label_5">
            <property name="text">
             <string>拼接模式：</string>
            </property>
           </widget>
          </item>
-         <item row="2" column="1">
+         <item row="3" column="1">
           <widget class="QComboBox" name="comboBox_mode">
            <item>
             <property name="text">
@@ -143,14 +150,14 @@
            </item>
           </widget>
          </item>
-         <item row="3" column="0">
+         <item row="4" column="0">
           <widget class="QLabel" name="label_direction">
            <property name="text">
             <string>拼接方向：</string>
            </property>
           </widget>
          </item>
-         <item row="3" column="1">
+         <item row="4" column="1">
           <widget class="QComboBox" name="comboBox_direction">
            <item>
             <property name="text">
@@ -169,14 +176,14 @@
            </item>
           </widget>
          </item>
-         <item row="4" column="0">
+         <item row="5" column="0">
           <widget class="QLabel" name="label_6">
            <property name="text">
             <string>匹配阈值：</string>
            </property>
           </widget>
          </item>
-         <item row="4" column="1">
+         <item row="5" column="1">
           <widget class="QDoubleSpinBox" name="doubleSpinBox_matchThreshold">
            <property name="minimum">
             <double>0.000000000000000</double>
@@ -192,14 +199,14 @@
            </property>
           </widget>
          </item>
-         <item row="5" column="0">
+         <item row="6" column="0">
           <widget class="QLabel" name="label_7">
            <property name="text">
             <string>拼接置信度阈值：</string>
            </property>
           </widget>
          </item>
-         <item row="5" column="1">
+         <item row="6" column="1">
           <widget class="QDoubleSpinBox" name="doubleSpinBox_confidenceThreshold">
            <property name="minimum">
             <double>0.000000000000000</double>

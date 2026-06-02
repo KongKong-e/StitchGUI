@@ -77,6 +77,17 @@ CONFIG(debug, debug|release) {
     LIBS += $$ONNXRUNTIME_PATH/lib/onnxruntime.lib
 }
 
+# CUDA support (optional, auto-detect)
+CUDA_LIB = $$ONNXRUNTIME_PATH/lib/onnxruntime_providers_cuda.lib
+exists($$CUDA_LIB) {
+    LIBS += $$ONNXRUNTIME_PATH/lib/onnxruntime_providers_shared.lib
+    LIBS += $$CUDA_LIB
+    DEFINES += ONNX_CUDA_AVAILABLE
+    message("CUDA provider found, GPU support enabled")
+} else {
+    message("CUDA provider not found, GPU support disabled")
+}
+
 # Copy DLLs to build directory (Windows only)
 win32 {
     OPENCV_BIN = $$OPENCV_PATH/bin
@@ -99,6 +110,17 @@ win32 {
     QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${OPENCV_BIN}\\opencv_world4100$${DLL_SUFFIX}.dll\" \"$${DESTDIR_WIN}\\\" &)
     QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${OPENCV_BIN}\\opencv_videoio_ffmpeg4100_64.dll\" \"$${DESTDIR_WIN}\\\" &)
     QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${ONNX_LIB}\\onnxruntime.dll\" \"$${DESTDIR_WIN}\\\" &)
+    exists($$ONNX_LIB/onnxruntime_providers_cuda.dll) {
+        QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${ONNX_LIB}\\onnxruntime_providers_shared.dll\" \"$${DESTDIR_WIN}\\\" &)
+        QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${ONNX_LIB}\\onnxruntime_providers_cuda.dll\" \"$${DESTDIR_WIN}\\\" &)
+    }
+
+    # Copy cuDNN DLLs if bundled in project
+    CUDNN_SRC = $$PWD/cudnn
+    CUDNN_SRC ~= s,/,\\,g
+    exists($$CUDNN_SRC) {
+        QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${CUDNN_SRC}\\cudnn*.dll\" \"$${DESTDIR_WIN}\\\" &)
+    }
 
     # Copy model directory to build output
     MODEL_SRC = $$PWD/model

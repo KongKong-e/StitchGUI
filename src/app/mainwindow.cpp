@@ -33,6 +33,7 @@ StitchingWorker::StitchingWorker(QObject* parent)
     , m_matchThreshold(0.2f)
     , m_confidenceThreshold(0.1f)
     , m_saveMatching(false)
+    , m_useGpu(false)
     , m_stopRequested(false)
 {
 }
@@ -51,7 +52,8 @@ void StitchingWorker::setParameters(
     const std::string& outputName,
     bool saveMatching,
     const std::string& detector,
-    const std::string& matcher)
+    const std::string& matcher,
+    bool useGpu)
 {
     QMutexLocker locker(&m_mutex);
     m_imageDir = imageDir;
@@ -68,6 +70,7 @@ void StitchingWorker::setParameters(
     m_saveMatching = saveMatching;
     m_detector = detector;
     m_matcher = matcher;
+    m_useGpu = useGpu;
     m_stopRequested = false;
 }
 
@@ -93,7 +96,7 @@ cv::Ptr<cv::Feature2D> StitchingWorker::createDetector()
 cv::Ptr<cv::detail::FeaturesMatcher> StitchingWorker::createMatcher()
 {
     if (m_matcher == "lightglue")
-        return cv::makePtr<LightGlue>(m_lightGluePath, m_mode, m_matchThreshold);
+        return cv::makePtr<LightGlue>(m_lightGluePath, m_mode, m_matchThreshold, m_useGpu);
     else
         return cv::makePtr<ClassicalMatcher>(m_mode, m_matchThreshold);
 }
@@ -153,6 +156,16 @@ void StitchingWorker::process()
         emit logMessage("正在执行...");
         cv::Mat pano;
         cv::Stitcher::Status status = stitcher->stitch(imgs, pano);
+
+        // 输出 LightGlue 实际使用的推理设备（session 在 stitch 中首次匹配时创建）
+        if (m_matcher == "lightglue") {
+            LightGlue* lg = dynamic_cast<LightGlue*>(matcher.get());
+            if (lg) {
+                emit logMessage(lg->isUsingGpu()
+                    ? "LightGlue: 使用 GPU (CUDA) 推理"
+                    : "LightGlue: 使用 CPU 推理");
+            }
+        }
 
         emit progressChanged(80);
 
@@ -517,6 +530,10 @@ MainWindow::MainWindow(QWidget *parent)
         if (model) {
             model->item(0)->setEnabled(isSuperPoint);
         }
+
+        // GPU checkbox 仅在选中 LightGlue 时可见
+        bool isLightGlue = (ui->comboBox_matcher->currentIndex() == 0);
+        ui->checkBox_gpu->setVisible(isLightGlue && isSuperPoint);
     };
     connect(ui->comboBox_detector, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
     connect(ui->comboBox_matcher, &QComboBox::currentIndexChanged, this, updateAlgoVisibility);
@@ -730,6 +747,7 @@ void MainWindow::on_startStitching_clicked()
     static const QStringList matchers = {"lightglue", "bfmatcher"};
     std::string detector = detectors[ui->comboBox_detector->currentIndex()].toStdString();
     std::string matcher = matchers[ui->comboBox_matcher->currentIndex()].toStdString();
+    bool useGpu = ui->checkBox_gpu->isChecked();
 
     const QString inputDir = ui->lineEdit_imageDir->text();
     const QString inputFolderName = QFileInfo(inputDir).fileName();
@@ -746,7 +764,7 @@ void MainWindow::on_startStitching_clicked()
         waveCorrectKind,
         matchThreshold, confidenceThreshold,
         outputDir, outputName, saveMatching,
-        detector, matcher);
+        detector, matcher, useGpu);
 
     m_worker->moveToThread(m_workerThread);
 

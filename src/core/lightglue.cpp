@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <opencv2/opencv.hpp>
+#include <QDebug>
 
 #include <onnxruntime_cxx_api.h>
 
@@ -13,11 +14,13 @@
 LightGlue::LightGlue(
 	std::wstring modelPath,
 	cv::Stitcher::Mode mode,
-	float matchThresh)
+	float matchThresh,
+	bool useGpu)
 {
 	this->m_matchThresh = matchThresh;
 	this->m_mode = mode;
-	
+	this->m_useGpu = useGpu;
+
 	this->m_modelPath = modelPath;
 }
 
@@ -30,16 +33,69 @@ void LightGlue::match(
 	static Ort::Env env(ORT_LOGGING_LEVEL_FATAL, "LightGlue");
 	static std::map<std::wstring, Ort::Session*> sessions;
 
-	if (sessions.find(this->m_modelPath) == sessions.end())
-	{
-		Ort::SessionOptions sessionOptions;
-		sessionOptions.SetIntraOpNumThreads(4);
-		sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+	// 缓存 key 区分 GPU/CPU，避免混用
+	std::wstring gpuKey = this->m_modelPath + L"_gpu";
+	std::wstring cpuKey = this->m_modelPath + L"_cpu";
+	std::wstring cacheKey = this->m_useGpu ? gpuKey : cpuKey;
 
-		// 在 Windows 上直接使用宽字符路径，避免编码转换导致的乱码问题
-		sessions[this->m_modelPath] = new Ort::Session(env, this->m_modelPath.c_str(), sessionOptions);
+	if (sessions.find(cacheKey) == sessions.end())
+	{
+		if (this->m_useGpu)
+		{
+#ifdef ONNX_CUDA_AVAILABLE
+			// 尝试创建 GPU session
+			try {
+				Ort::SessionOptions gpuOptions;
+				gpuOptions.SetIntraOpNumThreads(4);
+				gpuOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+
+				OrtCUDAProviderOptions cudaOptions;
+				cudaOptions.device_id = 0;
+				gpuOptions.AppendExecutionProvider_CUDA(cudaOptions);
+
+				sessions[gpuKey] = new Ort::Session(env, this->m_modelPath.c_str(), gpuOptions);
+				this->m_gpuActive = true;
+				qWarning("LightGlue: GPU (CUDA) session 创建成功");
+			}
+			catch (...) {
+				// GPU session 创建失败，回退到 CPU
+				this->m_useGpu = false;
+				this->m_gpuActive = false;
+				qWarning("LightGlue: GPU 不可用，回退到 CPU 推理");
+
+				Ort::SessionOptions cpuOptions;
+				cpuOptions.SetIntraOpNumThreads(4);
+				cpuOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+
+				sessions[cpuKey] = new Ort::Session(env, this->m_modelPath.c_str(), cpuOptions);
+				sessions[gpuKey] = sessions[cpuKey];  // GPU key 也指向 CPU session
+			}
+#else
+			// CUDA SDK 未安装，直接使用 CPU
+			qWarning("LightGlue: 未检测到 CUDA SDK，使用 CPU 推理");
+			this->m_useGpu = false;
+			this->m_gpuActive = false;
+
+			Ort::SessionOptions sessionOptions;
+			sessionOptions.SetIntraOpNumThreads(4);
+			sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+
+			sessions[cpuKey] = new Ort::Session(env, this->m_modelPath.c_str(), sessionOptions);
+			sessions[gpuKey] = sessions[cpuKey];  // GPU key 也指向 CPU session
+#endif
+		}
+		else
+		{
+			Ort::SessionOptions sessionOptions;
+			sessionOptions.SetIntraOpNumThreads(4);
+			sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+
+			// 在 Windows 上直接使用宽字符路径，避免编码转换导致的乱码问题
+			sessions[cacheKey] = new Ort::Session(env, this->m_modelPath.c_str(), sessionOptions);
+			this->m_gpuActive = false;
+		}
 	}
-	Ort::Session* lightglueSession = sessions[this->m_modelPath];
+	Ort::Session* lightglueSession = sessions[cacheKey];
 
 	// 归一化关键点坐标
 	int n1 = static_cast<int>(features1.keypoints.size());

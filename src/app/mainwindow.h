@@ -46,7 +46,8 @@ public:
         const std::string& outputName,
         bool saveMatching,
         const std::string& detector,
-        const std::string& matcher);
+        const std::string& matcher,
+        bool useGpu);
 
 public slots:
     void process();
@@ -73,6 +74,7 @@ private:
     bool m_saveMatching;
     std::string m_detector;
     std::string m_matcher;
+    bool m_useGpu;
     bool m_stopRequested;
     QMutex m_mutex;
 
