@@ -35,9 +35,6 @@ Makefile*
 *.vcxproj.user
 .qtc_clangd/
 
-# ========== 模型文件（大文件，不适合放 GitHub）==========
-model/
-
 # ========== cuDNN（需单独下载）==========
 cudnn/
 

@@ -11,7 +11,7 @@
    </rect>
   </property>
     <property name="windowTitle">
-     <string>SuperStitch光伏场景的全景创建</string>
+     <string>PVStitch</string>
     </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QHBoxLayout" name="horizontalLayout_main">

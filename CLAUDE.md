@@ -133,7 +133,5 @@ sp_lg_pano_mt0.3_ct0.5/
 ## 待解决问题
 
 -GPU（装 CUDA Toolkit 12.x）
--文件自动命名/系统名字（PVStitch）
--英文
 -批处理脚本
 

@@ -47,7 +47,8 @@ public:
         bool saveMatching,
         const std::string& detector,
         const std::string& matcher,
-        bool useGpu);
+        bool useGpu,
+        bool isEnglish);
 
 public slots:
     void process();
@@ -75,6 +76,7 @@ private:
     std::string m_detector;
     std::string m_matcher;
     bool m_useGpu;
+    bool m_isEnglish;
     bool m_stopRequested;
     QMutex m_mutex;
 
@@ -102,6 +104,7 @@ private slots:
     void on_errorGuide_triggered();
     void on_paramGuide_triggered();
     void on_about_triggered();
+    void on_switchLanguage_triggered();
     void on_modelSettings_triggered();
     void on_zoomIn_clicked();
     void on_zoomOut_clicked();
@@ -124,6 +127,9 @@ private:
 
     void initializeConnections();
     void updateUIState(bool processing);
+    void retranslateUi();
+
+    bool m_isEnglish = false;
     void displayImage(const cv::Mat& image);
     void appendLog(const QString& message);
     bool validateParameters();
@@ -153,6 +159,13 @@ private:
     double m_lastElapsedSec;
     QLabel* m_statusLabel;
     QLabel* m_timeLabel;
+
+    // Menu action pointers (for retranslateUi)
+    QAction* m_operationGuideAction;
+    QAction* m_errorGuideAction;
+    QAction* m_paramGuideAction;
+    QAction* m_exportLogAction;
+    QAction* m_langAction;
 
     bool eventFilter(QObject* obj, QEvent* event) override;
 };

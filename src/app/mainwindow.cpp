@@ -34,6 +34,7 @@ StitchingWorker::StitchingWorker(QObject* parent)
     , m_confidenceThreshold(0.1f)
     , m_saveMatching(false)
     , m_useGpu(false)
+    , m_isEnglish(false)
     , m_stopRequested(false)
 {
 }
@@ -53,7 +54,8 @@ void StitchingWorker::setParameters(
     bool saveMatching,
     const std::string& detector,
     const std::string& matcher,
-    bool useGpu)
+    bool useGpu,
+    bool isEnglish)
 {
     QMutexLocker locker(&m_mutex);
     m_imageDir = imageDir;
@@ -71,6 +73,7 @@ void StitchingWorker::setParameters(
     m_detector = detector;
     m_matcher = matcher;
     m_useGpu = useGpu;
+    m_isEnglish = isEnglish;
     m_stopRequested = false;
 }
 
@@ -90,7 +93,7 @@ cv::Ptr<cv::Feature2D> StitchingWorker::createDetector()
         return cv::ORB::create(1000);
     else if (m_detector == "surf")
         return cv::makePtr<SurfDetector>();
-    throw std::runtime_error("不支持的检测器: " + m_detector);
+    throw std::runtime_error(m_isEnglish ? ("Unsupported detector: " + m_detector) : ("不支持的检测器: " + m_detector));
 }
 
 cv::Ptr<cv::detail::FeaturesMatcher> StitchingWorker::createMatcher()
@@ -104,35 +107,41 @@ cv::Ptr<cv::detail::FeaturesMatcher> StitchingWorker::createMatcher()
 void StitchingWorker::process()
 {
     try {
-        emit logMessage("开始...");
+        emit logMessage(m_isEnglish ? "Starting..." : "开始...");
 
         emit progressChanged(10);
-        emit logMessage("正在读取图像...");
+        emit logMessage(m_isEnglish ? "Reading images..." : "正在读取图像...");
 
         std::vector<cv::Mat> imgs = readImages(m_imageDir, m_extension, m_divideImages);
 
         if (imgs.empty()) {
-            emit errorOccurred("未找到任何图像文件！");
+            emit errorOccurred(m_isEnglish ? "No image files found!" : "未找到任何图像文件！");
             emit finished();
             return;
         }
 
-        emit logMessage(QString("成功读取 %1 张图像").arg(imgs.size()));
+        emit logMessage(m_isEnglish
+            ? QString("Successfully read %1 images").arg(imgs.size())
+            : QString("成功读取 %1 张图像").arg(imgs.size()));
         emit progressChanged(30);
 
         {
             QMutexLocker locker(&m_mutex);
             if (m_stopRequested) {
-                emit logMessage("拼接已停止");
+                emit logMessage(m_isEnglish ? "Stitching stopped" : "拼接已停止");
                 emit finished();
                 return;
             }
         }
 
-        emit logMessage("正在初始化特征检测器: " + QString::fromStdString(m_detector) + "...");
+        emit logMessage(m_isEnglish
+            ? "Initializing feature detector: " + QString::fromStdString(m_detector) + "..."
+            : "正在初始化特征检测器: " + QString::fromStdString(m_detector) + "...");
         cv::Ptr<cv::Feature2D> detector = createDetector();
 
-        emit logMessage("正在初始化匹配器: " + QString::fromStdString(m_matcher) + "...");
+        emit logMessage(m_isEnglish
+            ? "Initializing matcher: " + QString::fromStdString(m_matcher) + "..."
+            : "正在初始化匹配器: " + QString::fromStdString(m_matcher) + "...");
         cv::Ptr<cv::detail::FeaturesMatcher> matcher = createMatcher();
 
         emit progressChanged(50);
@@ -140,53 +149,55 @@ void StitchingWorker::process()
         {
             QMutexLocker locker(&m_mutex);
             if (m_stopRequested) {
-                emit logMessage("拼接已停止");
+                emit logMessage(m_isEnglish ? "Stitching stopped" : "拼接已停止");
                 emit finished();
                 return;
             }
         }
 
-        emit logMessage("正在创建拼接器...");
+        emit logMessage(m_isEnglish ? "Creating stitcher..." : "正在创建拼接器...");
         cv::Ptr<cv::Stitcher> stitcher = cv::Stitcher::create(m_mode);
         stitcher->setPanoConfidenceThresh(m_confidenceThreshold);
         stitcher->setFeaturesFinder(detector);
         stitcher->setFeaturesMatcher(matcher);
         stitcher->setWaveCorrectKind(static_cast<cv::detail::WaveCorrectKind>(m_waveCorrectKind));
 
-        emit logMessage("正在执行...");
+        emit logMessage(m_isEnglish ? "Stitching in progress..." : "正在执行...");
         cv::Mat pano;
         cv::Stitcher::Status status = stitcher->stitch(imgs, pano);
 
-        // 输出 LightGlue 实际使用的推理设备（session 在 stitch 中首次匹配时创建）
         if (m_matcher == "lightglue") {
             LightGlue* lg = dynamic_cast<LightGlue*>(matcher.get());
             if (lg) {
                 emit logMessage(lg->isUsingGpu()
-                    ? "LightGlue: 使用 GPU (CUDA) 推理"
-                    : "LightGlue: 使用 CPU 推理");
+                    ? (m_isEnglish ? "LightGlue: Using GPU (CUDA) inference" : "LightGlue: 使用 GPU (CUDA) 推理")
+                    : (m_isEnglish ? "LightGlue: Using CPU inference" : "LightGlue: 使用 CPU 推理"));
             }
         }
 
         emit progressChanged(80);
 
         if (status == cv::Stitcher::OK) {
-            emit logMessage("拼接成功！");
+            emit logMessage(m_isEnglish ? "Stitching succeeded!" : "拼接成功！");
 
-            // 使用用户指定的输出目录（默认为 m_imageDir + "/superstitch"，但也可能被用户修改）
             std::string resDir = m_outputDir;
             if (libpano::create_directory(resDir)) {
-                emit logMessage("创建输出目录: " + QString::fromStdString(resDir));
+                emit logMessage(m_isEnglish
+                    ? "Created output directory: " + QString::fromStdString(resDir)
+                    : "创建输出目录: " + QString::fromStdString(resDir));
             }
 
             std::string outputPath = resDir + "/" + m_outputName;
             if (cv::imwrite(outputPath, pano)) {
-                emit logMessage("保存拼接结果: " + QString::fromStdString(outputPath));
+                emit logMessage(m_isEnglish
+                    ? "Saved stitching result: " + QString::fromStdString(outputPath)
+                    : "保存拼接结果: " + QString::fromStdString(outputPath));
             } else {
-                emit logMessage("警告: 保存拼接结果失败");
+                emit logMessage(m_isEnglish ? "Warning: Failed to save stitching result" : "警告: 保存拼接结果失败");
             }
 
             if (m_saveMatching) {
-                emit logMessage("正在保存匹配结果...");
+                emit logMessage(m_isEnglish ? "Saving matching results..." : "正在保存匹配结果...");
 
                 std::vector<cv::detail::ImageFeatures> features;
                 std::vector<cv::detail::MatchesInfo> matches;
@@ -235,7 +246,9 @@ void StitchingWorker::process()
                     std::string matchPath = resDir + "/match_" + std::to_string(matches[i].src_img_idx) +
                         std::string("_") + std::to_string(matches[i].dst_img_idx) + ".jpg";
                     cv::imwrite(matchPath, imgMatches);
-                    emit logMessage("保存匹配结果: " + QString::fromStdString(matchPath));
+                    emit logMessage(m_isEnglish
+                        ? "Saved matching result: " + QString::fromStdString(matchPath)
+                        : "保存匹配结果: " + QString::fromStdString(matchPath));
                 }
             }
 
@@ -245,25 +258,27 @@ void StitchingWorker::process()
             QString errorMsg;
             switch (status) {
                 case cv::Stitcher::ERR_NEED_MORE_IMGS:
-                    errorMsg = "错误: 需要更多图像";
+                    errorMsg = m_isEnglish ? "Error: Need more images" : "错误: 需要更多图像";
                     break;
                 case cv::Stitcher::ERR_HOMOGRAPHY_EST_FAIL:
-                    errorMsg = "错误: 单应性矩阵估计失败";
+                    errorMsg = m_isEnglish ? "Error: Homography estimation failed" : "错误: 单应性矩阵估计失败";
                     break;
                 case cv::Stitcher::ERR_CAMERA_PARAMS_ADJUST_FAIL:
-                    errorMsg = "错误: 相机参数调整失败";
+                    errorMsg = m_isEnglish ? "Error: Camera parameters adjustment failed" : "错误: 相机参数调整失败";
                     break;
                 default:
-                    errorMsg = "错误: 拼接失败 (错误代码: " + QString::number(status) + ")";
+                    errorMsg = m_isEnglish
+                        ? "Error: Stitching failed (error code: " + QString::number(status) + ")"
+                        : "错误: 拼接失败 (错误代码: " + QString::number(status) + ")";
                     break;
             }
             emit errorOccurred(errorMsg);
         }
 
     } catch (const std::exception& e) {
-        emit errorOccurred(QString("异常: %1").arg(e.what()));
+        emit errorOccurred(m_isEnglish ? QString("Exception: %1").arg(e.what()) : QString("异常: %1").arg(e.what()));
     } catch (...) {
-        emit errorOccurred("未知错误");
+        emit errorOccurred(m_isEnglish ? "Unknown error" : "未知错误");
     }
 
     emit finished();
@@ -277,7 +292,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
-    setWindowTitle("SuperStitch光伏场景的全景创建");
+    setWindowTitle("PVStitch");
 
     // 主流桌面工具风格: 清晰分区、强调主操作、提升可读性
     setStyleSheet(
@@ -413,25 +428,29 @@ MainWindow::MainWindow(QWidget *parent)
     ui->textEdit_log->setMinimumHeight(190);
     ui->statusbar->showMessage("就绪");
 
-    QAction* exportLogMenuAction = new QAction("导出日志...", this);
+    m_exportLogAction = new QAction("导出日志...", this);
     ui->menu->clear();
     ui->menu->addAction(ui->action_openImages);
-    ui->menu->addAction(exportLogMenuAction);
+    ui->menu->addAction(m_exportLogAction);
     ui->menu->addSeparator();
     ui->menu->addAction(ui->action_exit);
-    connect(exportLogMenuAction, &QAction::triggered, this, &MainWindow::on_exportLog_triggered);
+    connect(m_exportLogAction, &QAction::triggered, this, &MainWindow::on_exportLog_triggered);
 
-    QAction* operationGuideAction = new QAction("操作指南", this);
-    ui->menu_2->insertAction(ui->action_about, operationGuideAction);
-    connect(operationGuideAction, &QAction::triggered, this, &MainWindow::on_operationGuide_triggered);
+    m_operationGuideAction = new QAction("操作指南", this);
+    ui->menu_2->insertAction(ui->action_about, m_operationGuideAction);
+    connect(m_operationGuideAction, &QAction::triggered, this, &MainWindow::on_operationGuide_triggered);
 
-    QAction* errorGuideAction = new QAction("报错说明", this);
-    ui->menu_2->insertAction(ui->action_about, errorGuideAction);
-    connect(errorGuideAction, &QAction::triggered, this, &MainWindow::on_errorGuide_triggered);
+    m_errorGuideAction = new QAction("报错说明", this);
+    ui->menu_2->insertAction(ui->action_about, m_errorGuideAction);
+    connect(m_errorGuideAction, &QAction::triggered, this, &MainWindow::on_errorGuide_triggered);
 
-    QAction* paramGuideAction = new QAction("参数说明", this);
-    ui->menu_2->insertAction(ui->action_about, paramGuideAction);
-    connect(paramGuideAction, &QAction::triggered, this, &MainWindow::on_paramGuide_triggered);
+    m_paramGuideAction = new QAction("参数说明", this);
+    ui->menu_2->insertAction(ui->action_about, m_paramGuideAction);
+    connect(m_paramGuideAction, &QAction::triggered, this, &MainWindow::on_paramGuide_triggered);
+
+    m_langAction = new QAction("English", this);
+    ui->menu_2->insertAction(ui->action_about, m_langAction);
+    connect(m_langAction, &QAction::triggered, this, &MainWindow::on_switchLanguage_triggered);
     
     // 预设模型路径（相对于可执行文件目录）
     QString appDir = QCoreApplication::applicationDirPath();
@@ -461,7 +480,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_statusLabel->setFixedHeight(30);
     m_statusLabel->setMinimumWidth(110);
     m_statusLabel->setAlignment(Qt::AlignCenter);
-    m_statusLabel->setText("● 就绪");
+    m_statusLabel->setText(m_isEnglish ? "● Ready" : "● 就绪");
     m_statusLabel->setStyleSheet(
         "QLabel { background-color: #eafaf1; border: 1px solid #27ae60; border-radius: 6px; "
         "padding: 2px 10px; font-size: 14px; font-weight: bold; color: #27ae60; }");
@@ -560,7 +579,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->doubleSpinBox_matchThreshold, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, refreshOutputTag);
     connect(ui->doubleSpinBox_confidenceThreshold, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, refreshOutputTag);
 
-    appendLog("SuperStitch GUI 已启动");
+    appendLog(m_isEnglish ? "PVStitch GUI started" : "SuperStitch GUI 已启动");
+    retranslateUi();
 }
 
 MainWindow::~MainWindow()
@@ -609,10 +629,10 @@ QString MainWindow::buildOutputTag() const
 
 void MainWindow::on_browseImageDir_clicked()
 {
-    QString dir = QFileDialog::getExistingDirectory(this, "选择图像文件夹", "");
+    QString dir = QFileDialog::getExistingDirectory(this, m_isEnglish ? "Select Image Folder" : "选择图像文件夹", "");
     if (!dir.isEmpty()) {
         ui->lineEdit_imageDir->setText(dir);
-        appendLog("选择图像文件夹: " + dir);
+        appendLog(m_isEnglish ? "Selected image folder: " + dir : "选择图像文件夹: " + dir);
 
         // 根据当前算法参数自动生成输出文件夹名
         QString tag = buildOutputTag();
@@ -624,29 +644,29 @@ void MainWindow::on_browseImageDir_clicked()
 
 void MainWindow::on_browseOutputDir_clicked()
 {
-    QString dir = QFileDialog::getExistingDirectory(this, "选择输出文件夹", "");
+    QString dir = QFileDialog::getExistingDirectory(this, m_isEnglish ? "Select Output Folder" : "选择输出文件夹", "");
     if (!dir.isEmpty()) {
         ui->lineEdit_outputDir->setText(dir);
         ui->lineEdit_outputName->setText(QFileInfo(dir).fileName() + ".jpg");
-        appendLog("选择输出文件夹: " + dir);
+        appendLog(m_isEnglish ? "Selected output folder: " + dir : "选择输出文件夹: " + dir);
     }
 }
 
 void MainWindow::on_modelSettings_triggered()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle("模型设置");
+    dialog.setWindowTitle(m_isEnglish ? "Model Settings" : "模型设置");
     dialog.setMinimumWidth(500);
 
     QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
 
     // SuperPoint 模型
     QHBoxLayout* spLayout = new QHBoxLayout();
-    QLabel* spLabel = new QLabel("SuperPoint模型：", &dialog);
+    QLabel* spLabel = new QLabel(m_isEnglish ? "SuperPoint Model:" : "SuperPoint模型：", &dialog);
     QLineEdit* spEdit = new QLineEdit(&dialog);
     spEdit->setText(m_superPointPath);
-    spEdit->setPlaceholderText("请选择 superpoint.onnx");
-    QPushButton* spBrowse = new QPushButton("浏览...", &dialog);
+    spEdit->setPlaceholderText(m_isEnglish ? "Select superpoint.onnx" : "请选择 superpoint.onnx");
+    QPushButton* spBrowse = new QPushButton(m_isEnglish ? "Browse..." : "浏览...", &dialog);
     spLayout->addWidget(spLabel);
     spLayout->addWidget(spEdit, 1);
     spLayout->addWidget(spBrowse);
@@ -654,11 +674,11 @@ void MainWindow::on_modelSettings_triggered()
 
     // LightGlue 模型
     QHBoxLayout* lgLayout = new QHBoxLayout();
-    QLabel* lgLabel = new QLabel("LightGlue模型：", &dialog);
+    QLabel* lgLabel = new QLabel(m_isEnglish ? "LightGlue Model:" : "LightGlue模型：", &dialog);
     QLineEdit* lgEdit = new QLineEdit(&dialog);
     lgEdit->setText(m_lightGluePath);
-    lgEdit->setPlaceholderText("请选择 lightglue.onnx");
-    QPushButton* lgBrowse = new QPushButton("浏览...", &dialog);
+    lgEdit->setPlaceholderText(m_isEnglish ? "Select lightglue.onnx" : "请选择 lightglue.onnx");
+    QPushButton* lgBrowse = new QPushButton(m_isEnglish ? "Browse..." : "浏览...", &dialog);
     lgLayout->addWidget(lgLabel);
     lgLayout->addWidget(lgEdit, 1);
     lgLayout->addWidget(lgBrowse);
@@ -666,19 +686,19 @@ void MainWindow::on_modelSettings_triggered()
 
     // 浏览按钮连接
     connect(spBrowse, &QPushButton::clicked, [&]() {
-        QString file = QFileDialog::getOpenFileName(&dialog, "选择SuperPoint模型文件", "", "ONNX Files (*.onnx)");
+        QString file = QFileDialog::getOpenFileName(&dialog, m_isEnglish ? "Select SuperPoint Model" : "选择SuperPoint模型文件", "", "ONNX Files (*.onnx)");
         if (!file.isEmpty()) spEdit->setText(file);
     });
     connect(lgBrowse, &QPushButton::clicked, [&]() {
-        QString file = QFileDialog::getOpenFileName(&dialog, "选择LightGlue模型文件", "", "ONNX Files (*.onnx)");
+        QString file = QFileDialog::getOpenFileName(&dialog, m_isEnglish ? "Select LightGlue Model" : "选择LightGlue模型文件", "", "ONNX Files (*.onnx)");
         if (!file.isEmpty()) lgEdit->setText(file);
     });
 
     // 确定/取消按钮
     QHBoxLayout* btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
-    QPushButton* okBtn = new QPushButton("确定", &dialog);
-    QPushButton* cancelBtn = new QPushButton("取消", &dialog);
+    QPushButton* okBtn = new QPushButton(m_isEnglish ? "OK" : "确定", &dialog);
+    QPushButton* cancelBtn = new QPushButton(m_isEnglish ? "Cancel" : "取消", &dialog);
     btnLayout->addWidget(okBtn);
     btnLayout->addWidget(cancelBtn);
     mainLayout->addLayout(btnLayout);
@@ -689,7 +709,7 @@ void MainWindow::on_modelSettings_triggered()
     if (dialog.exec() == QDialog::Accepted) {
         m_superPointPath = spEdit->text();
         m_lightGluePath = lgEdit->text();
-        appendLog("模型路径已更新");
+        appendLog(m_isEnglish ? "Model paths updated" : "模型路径已更新");
     }
 }
 
@@ -700,7 +720,7 @@ void MainWindow::on_startStitching_clicked()
     }
 
     if (m_workerThread && m_workerThread->isRunning()) {
-        appendLog("已有拼接任务正在运行，请等待当前任务结束");
+        appendLog(m_isEnglish ? "A stitching task is already running, please wait" : "已有拼接任务正在运行，请等待当前任务结束");
         return;
     }
 
@@ -729,14 +749,6 @@ void MainWindow::on_startStitching_clicked()
 
     float matchThreshold = ui->doubleSpinBox_matchThreshold->value();
     float confidenceThreshold = ui->doubleSpinBox_confidenceThreshold->value();
-    // 根据当前参数刷新输出目录和文件名，确保名称反映实际使用的参数
-    QString tag = buildOutputTag();
-    QString baseDir = ui->lineEdit_imageDir->text();
-    if (!baseDir.isEmpty()) {
-        QString autoDir = baseDir + "/" + tag;
-        ui->lineEdit_outputDir->setText(autoDir);
-        ui->lineEdit_outputName->setText(tag + ".jpg");
-    }
 
     std::string outputDir = ui->lineEdit_outputDir->text().toStdString();
     std::string outputName = ui->lineEdit_outputName->text().toStdString();
@@ -752,11 +764,13 @@ void MainWindow::on_startStitching_clicked()
     const QString inputDir = ui->lineEdit_imageDir->text();
     const QString inputFolderName = QFileInfo(inputDir).fileName();
     const QString runId = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz");
-    m_currentRunTag = QString("[任务:%1|输入:%2]").arg(runId, inputFolderName.isEmpty() ? inputDir : inputFolderName);
+    m_currentRunTag = m_isEnglish
+        ? QString("[Task:%1|Input:%2]").arg(runId, inputFolderName.isEmpty() ? inputDir : inputFolderName)
+        : QString("[任务:%1|输入:%2]").arg(runId, inputFolderName.isEmpty() ? inputDir : inputFolderName);
     appendLog("==================================================");
-    appendLog(QString("%1 开始拼接").arg(m_currentRunTag));
-    appendLog(QString("%1 输入文件夹: %2").arg(m_currentRunTag, inputDir));
-    ui->statusbar->showMessage("正在拼接...");
+    appendLog(m_isEnglish ? QString("%1 Stitching started").arg(m_currentRunTag) : QString("%1 开始拼接").arg(m_currentRunTag));
+    appendLog(m_isEnglish ? QString("%1 Input folder: %2").arg(m_currentRunTag, inputDir) : QString("%1 输入文件夹: %2").arg(m_currentRunTag, inputDir));
+    ui->statusbar->showMessage(m_isEnglish ? "Stitching in progress..." : "正在拼接...");
 
     m_worker->setParameters(
         imageDir, extension, divideImages,
@@ -764,7 +778,7 @@ void MainWindow::on_startStitching_clicked()
         waveCorrectKind,
         matchThreshold, confidenceThreshold,
         outputDir, outputName, saveMatching,
-        detector, matcher, useGpu);
+        detector, matcher, useGpu, m_isEnglish);
 
     m_worker->moveToThread(m_workerThread);
 
@@ -811,24 +825,24 @@ void MainWindow::on_reset_clicked()
     
     // 允许用户重新操作
     updateUIState(false);
-    ui->statusbar->showMessage("已重置，可重新选择图像文件夹");
-    
-    appendLog("--- 重置完成，请选择新的图像文件夹 ---");
+    ui->statusbar->showMessage(m_isEnglish ? "Reset complete, select a new image folder" : "已重置，可重新选择图像文件夹");
+
+    appendLog(m_isEnglish ? "--- Reset complete, please select a new image folder ---" : "--- 重置完成，请选择新的图像文件夹 ---");
 }
 
 void MainWindow::on_exportLog_triggered()
 {
     const QString logText = ui->textEdit_log->toPlainText();
     if (logText.isEmpty()) {
-        QMessageBox::information(this, "提示", "当前没有可导出的日志内容。");
+        QMessageBox::information(this, m_isEnglish ? "Info" : "提示", m_isEnglish ? "No log content to export." : "当前没有可导出的日志内容。");
         return;
     }
 
-    const QString defaultName = QString("SuperStitch_Log_%1.txt")
+    const QString defaultName = QString("PVStitch_Log_%1.txt")
         .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
     const QString filePath = QFileDialog::getSaveFileName(
         this,
-        "导出日志",
+        m_isEnglish ? "Export Log" : "导出日志",
         defaultName,
         "Text Files (*.txt);;All Files (*)");
 
@@ -838,7 +852,7 @@ void MainWindow::on_exportLog_triggered()
 
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, "导出失败", "无法写入日志文件，请检查路径权限。");
+        QMessageBox::warning(this, m_isEnglish ? "Export Failed" : "导出失败", m_isEnglish ? "Cannot write log file. Please check path permissions." : "无法写入日志文件，请检查路径权限。");
         return;
     }
 
@@ -847,8 +861,8 @@ void MainWindow::on_exportLog_triggered()
     out << logText;
     file.close();
 
-    appendLog(QString("日志已导出: %1").arg(filePath));
-    ui->statusbar->showMessage("日志导出成功", 3000);
+    appendLog(m_isEnglish ? QString("Log exported: %1").arg(filePath) : QString("日志已导出: %1").arg(filePath));
+    ui->statusbar->showMessage(m_isEnglish ? "Log exported successfully" : "日志导出成功", 3000);
 }
 
 void MainWindow::on_openImages_triggered()
@@ -863,18 +877,27 @@ void MainWindow::on_exit_triggered()
 
 void MainWindow::on_about_triggered()
 {
-    QMessageBox::about(this, "关于 StitchGUI",
-        "StitchGUI - 图像拼接工具\n\n"
-        "支持特征检测器: SuperPoint, SIFT, ORB, SURF\n"
-        "支持匹配器: LightGlue, BFMatcher\n"
-        "版本: 1.1\n\n"
-        "使用Qt 6.5.3 + OpenCV 4.10 + ONNX Runtime开发");
+    if (m_isEnglish) {
+        QMessageBox::about(this, "About PVStitch",
+            "PVStitch - Image Stitching Tool\n\n"
+            "Supported feature detectors: SuperPoint, SIFT, ORB, SURF\n"
+            "Supported matchers: LightGlue, BFMatcher\n"
+            "Version: 1.1\n\n"
+            "Built with Qt 6.5.3 + OpenCV 4.10 + ONNX Runtime");
+    } else {
+        QMessageBox::about(this, "关于 StitchGUI",
+            "StitchGUI - 图像拼接工具\n\n"
+            "支持特征检测器: SuperPoint, SIFT, ORB, SURF\n"
+            "支持匹配器: LightGlue, BFMatcher\n"
+            "版本: 1.1\n\n"
+            "使用Qt 6.5.3 + OpenCV 4.10 + ONNX Runtime开发");
+    }
 }
 
 void MainWindow::on_operationGuide_triggered()
 {
     QDialog guideDialog(this);
-    guideDialog.setWindowTitle("操作指南");
+    guideDialog.setWindowTitle(m_isEnglish ? "Operation Guide" : "操作指南");
     guideDialog.resize(780, 560);
 
     QVBoxLayout* mainLayout = new QVBoxLayout(&guideDialog);
@@ -890,38 +913,71 @@ void MainWindow::on_operationGuide_triggered()
         "}"
     );
 
-    docViewer->setHtml(
-        "<h2 style='color:#1f2937;margin-bottom:8px;'>StitchGUI 操作指南</h2>"
-        "<p style='color:#4b5563;'>本指南用于帮助新手快速完成首次拼接任务。</p>"
-        "<h3 style='color:#2563eb;'>一、准备阶段</h3>"
-        "<ol>"
-        "<li>在<b>图像设置</b>中选择待拼接图像文件夹。</li>"
-        "<li>确认图像扩展名（如 <code>*.jpg</code>）。</li>"
-        "<li>按需启用‘分割图像’选项。</li>"
-        "</ol>"
-        "<h3 style='color:#2563eb;'>二、算法与参数</h3>"
-        "<ol>"
-        "<li>在<b>拼接参数</b>中选择<b>特征检测器</b>：SuperPoint（深度学习）、SIFT、ORB 或 SURF（经典算法）。</li>"
-        "<li>选择<b>特征匹配器</b>：LightGlue（仅SuperPoint可用）或 BFMatcher（通用）。</li>"
-        "<li>如需对比不同检测器效果，建议统一使用 BFMatcher 保证匹配器一致。</li>"
-        "<li>SuperPoint 模式需在<b>模型设置</b>中指定 ONNX 模型路径。</li>"
-        "<li>根据图像质量微调匹配阈值与置信度阈值。</li>"
-        "</ol>"
-        "<h3 style='color:#2563eb;'>三、输出与执行</h3>"
-        "<ol>"
-        "<li>在<b>输出设置</b>中选择输出目录与输出文件名。</li>"
-        "<li>点击<b>开始拼接</b>执行任务，并观察下方日志。</li>"
-        "<li>结束后可在<b>文件 -> 导出日志...</b>中保存运行记录。</li>"
-        "</ol>"
-        "<h3 style='color:#2563eb;'>快捷提示</h3>"
-        "<ul>"
-        "<li><b>提示 1：</b>第二次拼接前可点击‘重置任务’快速清空路径输入。</li>"
-        "<li><b>提示 2：</b>出现错误时优先查看日志中带任务标识的报错行。</li>"
-        "<li><b>提示 3：</b>若结果异常，建议先用 Panorama 模式并降低阈值尝试。</li>"
-        "</ul>"
-    );
+    if (m_isEnglish) {
+        docViewer->setHtml(
+            "<h2 style=’color:#1f2937;margin-bottom:8px;’>PVStitch Operation Guide</h2>"
+            "<p style=’color:#4b5563;’>This guide helps beginners complete their first stitching task quickly.</p>"
+            "<h3 style=’color:#2563eb;’>1. Preparation</h3>"
+            "<ol>"
+            "<li>In <b>Image Settings</b>, select the folder containing images to stitch.</li>"
+            "<li>Confirm the image extension (e.g. <code>*.jpg</code>).</li>"
+            "<li>Enable ‘Split Image’ option if needed.</li>"
+            "</ol>"
+            "<h3 style=’color:#2563eb;’>2. Algorithm & Parameters</h3>"
+            "<ol>"
+            "<li>In <b>Stitching Parameters</b>, select a <b>Feature Detector</b>: SuperPoint (deep learning), SIFT, ORB, or SURF (classical).</li>"
+            "<li>Select a <b>Feature Matcher</b>: LightGlue (SuperPoint only) or BFMatcher (universal).</li>"
+            "<li>To compare detectors, use BFMatcher for consistent results.</li>"
+            "<li>SuperPoint requires ONNX model paths in <b>Model Settings</b>.</li>"
+            "<li>Fine-tune Match Threshold and Confidence Threshold based on image quality.</li>"
+            "</ol>"
+            "<h3 style=’color:#2563eb;’>3. Output & Execution</h3>"
+            "<ol>"
+            "<li>In <b>Output Settings</b>, select the output directory and filename.</li>"
+            "<li>Click <b>Start Stitching</b> and monitor the log below.</li>"
+            "<li>After completion, use <b>File -> Export Log...</b> to save the run log.</li>"
+            "</ol>"
+            "<h3 style=’color:#2563eb;’>Quick Tips</h3>"
+            "<ul>"
+            "<li><b>Tip 1:</b> Click ‘Reset’ before a second stitching to quickly clear inputs.</li>"
+            "<li><b>Tip 2:</b> When errors occur, check log lines with task identifiers first.</li>"
+            "<li><b>Tip 3:</b> For abnormal results, try Panorama mode with lower thresholds first.</li>"
+            "</ul>"
+        );
+    } else {
+        docViewer->setHtml(
+            "<h2 style=’color:#1f2937;margin-bottom:8px;’>StitchGUI 操作指南</h2>"
+            "<p style=’color:#4b5563;’>本指南用于帮助新手快速完成首次拼接任务。</p>"
+            "<h3 style=’color:#2563eb;’>一、准备阶段</h3>"
+            "<ol>"
+            "<li>在<b>图像设置</b>中选择待拼接图像文件夹。</li>"
+            "<li>确认图像扩展名（如 <code>*.jpg</code>）。</li>"
+            "<li>按需启用’分割图像’选项。</li>"
+            "</ol>"
+            "<h3 style=’color:#2563eb;’>二、算法与参数</h3>"
+            "<ol>"
+            "<li>在<b>拼接参数</b>中选择<b>特征检测器</b>：SuperPoint（深度学习）、SIFT、ORB 或 SURF（经典算法）。</li>"
+            "<li>选择<b>特征匹配器</b>：LightGlue（仅SuperPoint可用）或 BFMatcher（通用）。</li>"
+            "<li>如需对比不同检测器效果，建议统一使用 BFMatcher 保证匹配器一致。</li>"
+            "<li>SuperPoint 模式需在<b>模型设置</b>中指定 ONNX 模型路径。</li>"
+            "<li>根据图像质量微调匹配阈值与置信度阈值。</li>"
+            "</ol>"
+            "<h3 style=’color:#2563eb;’>三、输出与执行</h3>"
+            "<ol>"
+            "<li>在<b>输出设置</b>中选择输出目录与输出文件名。</li>"
+            "<li>点击<b>开始拼接</b>执行任务，并观察下方日志。</li>"
+            "<li>结束后可在<b>文件 -> 导出日志...</b>中保存运行记录。</li>"
+            "</ol>"
+            "<h3 style=’color:#2563eb;’>快捷提示</h3>"
+            "<ul>"
+            "<li><b>提示 1：</b>第二次拼接前可点击’重置任务’快速清空路径输入。</li>"
+            "<li><b>提示 2：</b>出现错误时优先查看日志中带任务标识的报错行。</li>"
+            "<li><b>提示 3：</b>若结果异常，建议先用 Panorama 模式并降低阈值尝试。</li>"
+            "</ul>"
+        );
+    }
 
-    QPushButton* closeButton = new QPushButton("我已了解", &guideDialog);
+    QPushButton* closeButton = new QPushButton(m_isEnglish ? "Got it" : "我已了解", &guideDialog);
     closeButton->setMinimumWidth(120);
 
     QHBoxLayout* buttonLayout = new QHBoxLayout();
@@ -938,7 +994,7 @@ void MainWindow::on_operationGuide_triggered()
 void MainWindow::on_errorGuide_triggered()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle("报错说明");
+    dialog.setWindowTitle(m_isEnglish ? "Error Guide" : "报错说明");
     dialog.resize(800, 620);
 
     QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
@@ -954,59 +1010,113 @@ void MainWindow::on_errorGuide_triggered()
         "}"
     );
 
-    viewer->setHtml(
-        "<h2 style='color:#1f2937;'>拼接报错说明</h2>"
-        "<p style='color:#6b7280;'>以下列出了所有可能的报错信息、触发原因及解决建议。</p>"
+    if (m_isEnglish) {
+        viewer->setHtml(
+            "<h2 style='color:#1f2937;'>Stitching Error Guide</h2>"
+            "<p style='color:#6b7280;'>Below are all possible error messages, their causes, and suggested solutions.</p>"
 
-        "<h3 style='color:#dc2626;'>❶ 未找到任何图像文件</h3>"
-        "<p><b>原因：</b>指定目录下没有符合扩展名的图像文件。</p>"
-        "<ul>"
-        "<li>扩展名不匹配（如实际是 <code>.JPG</code> 但填写了 <code>*.jpg</code>）</li>"
-        "<li>目录路径错误或目录为空</li>"
-        "</ul>"
-        "<p><b>解决：</b>检查图像目录和扩展名设置，确认文件存在。</p>"
+            "<h3 style='color:#dc2626;'>1. No Image Files Found</h3>"
+            "<p><b>Cause:</b> No image files matching the extension were found in the specified directory.</p>"
+            "<ul>"
+            "<li>Extension mismatch (e.g. actual is <code>.JPG</code> but specified <code>*.jpg</code>)</li>"
+            "<li>Directory path is wrong or empty</li>"
+            "</ul>"
+            "<p><b>Solution:</b> Check the image directory and extension settings, confirm files exist.</p>"
 
-        "<h3 style='color:#dc2626;'>❷ 需要更多图像</h3>"
-        "<p><b>原因：</b>图像之间特征匹配不足，拼接器无法建立有效的图像连接关系。</p>"
-        "<ul>"
-        "<li>相邻图像重叠区域太小（建议重叠 30% 以上）</li>"
-        "<li>图像纹理过于单一（如纯色天空、水面），特征点太少</li>"
-        "<li>匹配器阈值过于严格，丢弃了过多匹配</li>"
-        "</ul>"
-        "<p><b>解决：</b>增加图像重叠度，或降低匹配阈值（matchThreshold）重试。</p>"
+            "<h3 style='color:#dc2626;'>2. Need More Images</h3>"
+            "<p><b>Cause:</b> Insufficient feature matching between images, stitcher cannot establish valid image connections.</p>"
+            "<ul>"
+            "<li>Overlap between adjacent images is too small (recommend 30%+ overlap)</li>"
+            "<li>Image texture is too uniform (e.g. solid sky, water surface), too few feature points</li>"
+            "<li>Matcher threshold is too strict, discarding too many matches</li>"
+            "</ul>"
+            "<p><b>Solution:</b> Increase image overlap, or lower the match threshold (matchThreshold) and retry.</p>"
 
-        "<h3 style='color:#dc2626;'>❸ 单应性矩阵估计失败</h3>"
-        "<p><b>原因：</b>两幅图像之间的特征匹配无法求出有效的 Homography 矩阵。</p>"
-        "<ul>"
-        "<li><b>匹配外点（outlier）过多：</b>正确匹配少于 4 对，RANSAC 无法收敛。ORB 二进制描述子区分度低，更容易出现此问题</li>"
-        "<li><b>匹配点共线退化：</b>所有匹配点近似分布在一条直线上，矩阵奇异</li>"
-        "<li><b>图像间变换过大：</b>超出单应性模型的适用范围（如拍摄角度差异 > 30°）</li>"
-        "</ul>"
-        "<p><b>解决：</b>更换为 SIFT 或 SuperPoint 检测器，或增加图像数量和重叠度。</p>"
+            "<h3 style='color:#dc2626;'>3. Homography Estimation Failed</h3>"
+            "<p><b>Cause:</b> Feature matches between two images cannot produce a valid Homography matrix.</p>"
+            "<ul>"
+            "<li><b>Too many outliers:</b> Fewer than 4 correct matches, RANSAC cannot converge. ORB binary descriptors have lower discriminability and are more prone to this</li>"
+            "<li><b>Collinear degeneracy:</b> All match points approximately lie on a line, matrix is singular</li>"
+            "<li><b>Excessive transformation:</b> Beyond the applicable range of the homography model (e.g. angle difference > 30 degrees)</li>"
+            "</ul>"
+            "<p><b>Solution:</b> Switch to SIFT or SuperPoint detector, or increase image count and overlap.</p>"
 
-        "<h3 style='color:#dc2626;'>❹ 相机参数调整失败</h3>"
-        "<p><b>原因：</b>Bundle Adjustment（光束法平差）优化不收敛。</p>"
-        "<p>拼接流程为：特征匹配 → 单应性估计 → 分解为相机焦距/旋转 → 优化重投影误差。</p>"
-        "<ul>"
-        "<li><b>上游匹配质量差：</b>Homography 不准确 → 分解出的初始焦距为负数或 NaN → 优化从坏起点出发，无法收敛</li>"
-        "<li><b>图像间纯平移：</b>无法估计焦距，参数退化</li>"
-        "<li><b>数值不稳定：</b>旋转矩阵失去正交性</li>"
-        "</ul>"
-        "<p><b>解决：</b>这是匹配质量差的连锁反应。优先改善匹配（换检测器/调阈值），而非调整相机参数。</p>"
+            "<h3 style='color:#dc2626;'>4. Camera Parameters Adjustment Failed</h3>"
+            "<p><b>Cause:</b> Bundle Adjustment optimization did not converge.</p>"
+            "<p>Stitching pipeline: Feature matching -> Homography estimation -> Decompose into focal length/rotation -> Optimize reprojection error.</p>"
+            "<ul>"
+            "<li><b>Poor upstream matching:</b> Inaccurate Homography -> negative or NaN initial focal length -> optimization starts from bad point, cannot converge</li>"
+            "<li><b>Pure translation between images:</b> Cannot estimate focal length, parameters degenerate</li>"
+            "<li><b>Numerical instability:</b> Rotation matrix loses orthogonality</li>"
+            "</ul>"
+            "<p><b>Solution:</b> This is a cascading effect of poor matching. Focus on improving matching (change detector/tune threshold) rather than adjusting camera parameters.</p>"
 
-        "<h3 style='color:#dc2626;'>❺ 未知错误 / 异常</h3>"
-        "<p><b>原因：</b>程序捕获到 C++ 异常。</p>"
-        "<ul>"
-        "<li><b>ONNX 推理失败：</b>模型文件损坏、路径含中文、输入维度不匹配</li>"
-        "<li><b>内存不足：</b>图像分辨率过高，拼接过程内存耗尽</li>"
-        "<li><b>OpenCV 内部异常：</b>矩阵运算维度不匹配、空矩阵操作</li>"
-        "</ul>"
-        "<p><b>解决：</b>查看日志中的异常信息，检查模型文件和图像尺寸。</p>"
+            "<h3 style='color:#dc2626;'>5. Unknown Error / Exception</h3>"
+            "<p><b>Cause:</b> Program caught a C++ exception.</p>"
+            "<ul>"
+            "<li><b>ONNX inference failed:</b> Model file corrupted, path contains special characters, input dimension mismatch</li>"
+            "<li><b>Out of memory:</b> Image resolution too high, memory exhausted during stitching</li>"
+            "<li><b>OpenCV internal exception:</b> Matrix dimension mismatch, empty matrix operation</li>"
+            "</ul>"
+            "<p><b>Solution:</b> Check the exception message in the log, verify model files and image sizes.</p>"
 
-        "<hr style='margin:16px 0;'>"
-    );
+            "<hr style='margin:16px 0;'>"
+        );
+    } else {
+        viewer->setHtml(
+            "<h2 style='color:#1f2937;'>拼接报错说明</h2>"
+            "<p style='color:#6b7280;'>以下列出了所有可能的报错信息、触发原因及解决建议。</p>"
 
-    QPushButton* closeBtn = new QPushButton("关闭", &dialog);
+            "<h3 style='color:#dc2626;'>❶ 未找到任何图像文件</h3>"
+            "<p><b>原因：</b>指定目录下没有符合扩展名的图像文件。</p>"
+            "<ul>"
+            "<li>扩展名不匹配（如实际是 <code>.JPG</code> 但填写了 <code>*.jpg</code>）</li>"
+            "<li>目录路径错误或目录为空</li>"
+            "</ul>"
+            "<p><b>解决：</b>检查图像目录和扩展名设置，确认文件存在。</p>"
+
+            "<h3 style='color:#dc2626;'>❷ 需要更多图像</h3>"
+            "<p><b>原因：</b>图像之间特征匹配不足，拼接器无法建立有效的图像连接关系。</p>"
+            "<ul>"
+            "<li>相邻图像重叠区域太小（建议重叠 30% 以上）</li>"
+            "<li>图像纹理过于单一（如纯色天空、水面），特征点太少</li>"
+            "<li>匹配器阈值过于严格，丢弃了过多匹配</li>"
+            "</ul>"
+            "<p><b>解决：</b>增加图像重叠度，或降低匹配阈值（matchThreshold）重试。</p>"
+
+            "<h3 style='color:#dc2626;'>❸ 单应性矩阵估计失败</h3>"
+            "<p><b>原因：</b>两幅图像之间的特征匹配无法求出有效的 Homography 矩阵。</p>"
+            "<ul>"
+            "<li><b>匹配外点（outlier）过多：</b>正确匹配少于 4 对，RANSAC 无法收敛。ORB 二进制描述子区分度低，更容易出现此问题</li>"
+            "<li><b>匹配点共线退化：</b>所有匹配点近似分布在一条直线上，矩阵奇异</li>"
+            "<li><b>图像间变换过大：</b>超出单应性模型的适用范围（如拍摄角度差异 > 30°）</li>"
+            "</ul>"
+            "<p><b>解决：</b>更换为 SIFT 或 SuperPoint 检测器，或增加图像数量和重叠度。</p>"
+
+            "<h3 style='color:#dc2626;'>❹ 相机参数调整失败</h3>"
+            "<p><b>原因：</b>Bundle Adjustment（光束法平差）优化不收敛。</p>"
+            "<p>拼接流程为：特征匹配 → 单应性估计 → 分解为相机焦距/旋转 → 优化重投影误差。</p>"
+            "<ul>"
+            "<li><b>上游匹配质量差：</b>Homography 不准确 → 分解出的初始焦距为负数或 NaN → 优化从坏起点出发，无法收敛</li>"
+            "<li><b>图像间纯平移：</b>无法估计焦距，参数退化</li>"
+            "<li><b>数值不稳定：</b>旋转矩阵失去正交性</li>"
+            "</ul>"
+            "<p><b>解决：</b>这是匹配质量差的连锁反应。优先改善匹配（换检测器/调阈值），而非调整相机参数。</p>"
+
+            "<h3 style='color:#dc2626;'>❺ 未知错误 / 异常</h3>"
+            "<p><b>原因：</b>程序捕获到 C++ 异常。</p>"
+            "<ul>"
+            "<li><b>ONNX 推理失败：</b>模型文件损坏、路径含中文、输入维度不匹配</li>"
+            "<li><b>内存不足：</b>图像分辨率过高，拼接过程内存耗尽</li>"
+            "<li><b>OpenCV 内部异常：</b>矩阵运算维度不匹配、空矩阵操作</li>"
+            "</ul>"
+            "<p><b>解决：</b>查看日志中的异常信息，检查模型文件和图像尺寸。</p>"
+
+            "<hr style='margin:16px 0;'>"
+        );
+    }
+
+    QPushButton* closeBtn = new QPushButton(m_isEnglish ? "Close" : "关闭", &dialog);
     closeBtn->setMinimumWidth(100);
     QHBoxLayout* btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
@@ -1021,7 +1131,7 @@ void MainWindow::on_errorGuide_triggered()
 void MainWindow::on_paramGuide_triggered()
 {
     QDialog dialog(this);
-    dialog.setWindowTitle("参数说明");
+    dialog.setWindowTitle(m_isEnglish ? "Parameter Guide" : "参数说明");
     dialog.resize(780, 580);
 
     QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
@@ -1037,61 +1147,117 @@ void MainWindow::on_paramGuide_triggered()
         "}"
     );
 
-    viewer->setHtml(
-        "<h2 style='color:#1f2937;'>参数说明</h2>"
+    if (m_isEnglish) {
+        viewer->setHtml(
+            "<h2 style='color:#1f2937;'>Parameter Guide</h2>"
 
-        "<h3 style='color:#2563eb;'>图像设置</h3>"
-        "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
-        "<tr><td><b>图像目录</b></td><td>待拼接图像所在的文件夹路径</td></tr>"
-        "<tr><td><b>文件扩展名</b></td><td>图像过滤格式，如 <code>*.jpg</code>、<code>*.png</code></td></tr>"
-        "<tr><td><b>分割图像</b></td><td>将每张输入图像水平切分为三份再拼接，适用于单张宽幅扫描图</td></tr>"
-        "</table>"
+            "<h3 style='color:#2563eb;'>Image Settings</h3>"
+            "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+            "<tr><td><b>Image Directory</b></td><td>Folder path containing images to stitch</td></tr>"
+            "<tr><td><b>File Extension</b></td><td>Image filter format, e.g. <code>*.jpg</code>, <code>*.png</code></td></tr>"
+            "<tr><td><b>Split Image</b></td><td>Splits each input image horizontally into three parts before stitching, useful for wide scan images</td></tr>"
+            "</table>"
 
-        "<h3 style='color:#2563eb;'>拼接参数</h3>"
-        "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
-        "<tr><td><b>特征检测器</b></td>"
-        "<td><b>SuperPoint</b> — 深度学习，精度最高，需 ONNX 模型<br>"
-        "<b>SIFT</b> — 经典算法，鲁棒性好，速度适中<br>"
-        "<b>ORB</b> — 二进制描述子，速度最快，精度最低<br>"
-        "<b>SURF</b> — Haar 小波特征，速度快于 SIFT</td></tr>"
-        "<tr><td><b>特征匹配器</b></td>"
-        "<td><b>LightGlue</b> — 深度学习匹配，仅配合 SuperPoint 使用<br>"
-        "<b>BFMatcher</b> — 暴力匹配 + Lowe's 比率测试，适用于所有检测器</td></tr>"
-        "<tr><td><b>拼接模式</b></td>"
-        "<td><b>Panorama</b> — 全景模式，使用 Homography 变换（适用于旋转拍摄）<br>"
-        "<b>Scans</b> — 扫描模式，使用仿射变换（适用于平面扫描件）</td></tr>"
-        "<tr><td><b>拼接方向</b></td>"
-        "<td><b>自动</b> — 由算法自动判断<br>"
-        "<b>水平</b> — 强制水平拼接（左右排列）<br>"
-        "<b>垂直</b> — 强制垂直拼接（上下排列）</td></tr>"
-        "<tr><td><b>匹配阈值</b></td>"
-        "<td>范围 0~1，默认 0.6。控制特征匹配的筛选严格程度。<br>"
-        "值越大，匹配条件越宽松，匹配数量越多但误匹配也越多。<br>"
-        "建议：SuperPoint 0.3~0.5，SIFT/SURF 0.5~0.7，ORB 0.6~0.8</td></tr>"
-        "<tr><td><b>置信度阈值</b></td>"
-        "<td>范围 0~1，默认 0.2。控制图像对是否参与拼接的最低可信度。<br>"
-        "值越大，要求匹配质量越高，低质量图像对会被排除。<br>"
-        "建议：一般保持默认 0.1~0.3 即可</td></tr>"
-        "</table>"
+            "<h3 style='color:#2563eb;'>Stitching Parameters</h3>"
+            "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+            "<tr><td><b>Feature Detector</b></td>"
+            "<td><b>SuperPoint</b> - Deep learning, highest accuracy, requires ONNX model<br>"
+            "<b>SIFT</b> - Classical algorithm, good robustness, moderate speed<br>"
+            "<b>ORB</b> - Binary descriptor, fastest, lowest accuracy<br>"
+            "<b>SURF</b> - Haar wavelet features, faster than SIFT</td></tr>"
+            "<tr><td><b>Feature Matcher</b></td>"
+            "<td><b>LightGlue</b> - Deep learning matching, only works with SuperPoint<br>"
+            "<b>BFMatcher</b> - Brute-force matching + Lowe's ratio test, works with all detectors</td></tr>"
+            "<tr><td><b>Stitching Mode</b></td>"
+            "<td><b>Panorama</b> - Panorama mode, uses Homography transform (for rotational shooting)<br>"
+            "<b>Scans</b> - Scan mode, uses affine transform (for flat scanned documents)</td></tr>"
+            "<tr><td><b>Stitching Direction</b></td>"
+            "<td><b>Auto</b> - Determined automatically by algorithm<br>"
+            "<b>Horizontal</b> - Force horizontal stitching (left-right arrangement)<br>"
+            "<b>Vertical</b> - Force vertical stitching (top-bottom arrangement)</td></tr>"
+            "<tr><td><b>Match Threshold</b></td>"
+            "<td>Range 0~1, default 0.6. Controls the strictness of feature matching filtering.<br>"
+            "Higher values = looser matching, more matches but also more false matches.<br>"
+            "Recommended: SuperPoint 0.3~0.5, SIFT/SURF 0.5~0.7, ORB 0.6~0.8</td></tr>"
+            "<tr><td><b>Confidence Threshold</b></td>"
+            "<td>Range 0~1, default 0.2. Controls the minimum confidence for image pairs to participate in stitching.<br>"
+            "Higher values = stricter quality requirement, low-quality pairs will be excluded.<br>"
+            "Recommended: Generally keep default 0.1~0.3</td></tr>"
+            "</table>"
 
-        "<h3 style='color:#2563eb;'>输出设置</h3>"
-        "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
-        "<tr><td><b>输出文件夹</b></td><td>拼接结果保存目录，会根据算法参数自动生成</td></tr>"
-        "<tr><td><b>输出文件名</b></td><td>拼接结果的文件名，格式如 <code>sp_lg_pano_mt0.3_ct0.2.jpg</code></td></tr>"
-        "<tr><td><b>保存匹配图</b></td><td>勾选后会在输出目录保存每对图像的特征匹配可视化图（match_0_1.jpg）</td></tr>"
-        "</table>"
+            "<h3 style='color:#2563eb;'>Output Settings</h3>"
+            "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+            "<tr><td><b>Output Folder</b></td><td>Directory for saving stitching results, auto-generated based on algorithm parameters</td></tr>"
+            "<tr><td><b>Output Filename</b></td><td>Filename for stitching result, format like <code>sp_lg_pano_mt0.3_ct0.2.jpg</code></td></tr>"
+            "<tr><td><b>Save Matching Images</b></td><td>When checked, saves feature matching visualization for each image pair (match_0_1.jpg)</td></tr>"
+            "</table>"
 
-        "<h3 style='color:#2563eb;'>输出命名规则</h3>"
-        "<p>文件夹和文件名自动按 <code>{检测器}_{匹配器}_{模式}_mt{匹配阈值}_ct{置信度}</code> 格式生成：</p>"
-        "<table cellpadding='4' cellspacing='0'>"
-        "<tr><td>sp</td><td>SuperPoint</td><td>sift</td><td>SIFT</td></tr>"
-        "<tr><td>orb</td><td>ORB</td><td>surf</td><td>SURF</td></tr>"
-        "<tr><td>lg</td><td>LightGlue</td><td>bf</td><td>BFMatcher</td></tr>"
-        "<tr><td>pano</td><td>Panorama</td><td>scan</td><td>Scans</td></tr>"
-        "</table>"
-    );
+            "<h3 style='color:#2563eb;'>Output Naming Convention</h3>"
+            "<p>Folders and filenames are auto-generated in <code>{detector}_{matcher}_{mode}_mt{matchThreshold}_ct{confidence}</code> format:</p>"
+            "<table cellpadding='4' cellspacing='0'>"
+            "<tr><td>sp</td><td>SuperPoint</td><td>sift</td><td>SIFT</td></tr>"
+            "<tr><td>orb</td><td>ORB</td><td>surf</td><td>SURF</td></tr>"
+            "<tr><td>lg</td><td>LightGlue</td><td>bf</td><td>BFMatcher</td></tr>"
+            "<tr><td>pano</td><td>Panorama</td><td>scan</td><td>Scans</td></tr>"
+            "</table>"
+        );
+    } else {
+        viewer->setHtml(
+            "<h2 style='color:#1f2937;'>参数说明</h2>"
 
-    QPushButton* closeBtn = new QPushButton("关闭", &dialog);
+            "<h3 style='color:#2563eb;'>图像设置</h3>"
+            "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+            "<tr><td><b>图像目录</b></td><td>待拼接图像所在的文件夹路径</td></tr>"
+            "<tr><td><b>文件扩展名</b></td><td>图像过滤格式，如 <code>*.jpg</code>、<code>*.png</code></td></tr>"
+            "<tr><td><b>分割图像</b></td><td>将每张输入图像水平切分为三份再拼接，适用于单张宽幅扫描图</td></tr>"
+            "</table>"
+
+            "<h3 style='color:#2563eb;'>拼接参数</h3>"
+            "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+            "<tr><td><b>特征检测器</b></td>"
+            "<td><b>SuperPoint</b> — 深度学习，精度最高，需 ONNX 模型<br>"
+            "<b>SIFT</b> — 经典算法，鲁棒性好，速度适中<br>"
+            "<b>ORB</b> — 二进制描述子，速度最快，精度最低<br>"
+            "<b>SURF</b> — Haar 小波特征，速度快于 SIFT</td></tr>"
+            "<tr><td><b>特征匹配器</b></td>"
+            "<td><b>LightGlue</b> — 深度学习匹配，仅配合 SuperPoint 使用<br>"
+            "<b>BFMatcher</b> — 暴力匹配 + Lowe's 比率测试，适用于所有检测器</td></tr>"
+            "<tr><td><b>拼接模式</b></td>"
+            "<td><b>Panorama</b> — 全景模式，使用 Homography 变换（适用于旋转拍摄）<br>"
+            "<b>Scans</b> — 扫描模式，使用仿射变换（适用于平面扫描件）</td></tr>"
+            "<tr><td><b>拼接方向</b></td>"
+            "<td><b>自动</b> — 由算法自动判断<br>"
+            "<b>水平</b> — 强制水平拼接（左右排列）<br>"
+            "<b>垂直</b> — 强制垂直拼接（上下排列）</td></tr>"
+            "<tr><td><b>匹配阈值</b></td>"
+            "<td>范围 0~1，默认 0.6。控制特征匹配的筛选严格程度。<br>"
+            "值越大，匹配条件越宽松，匹配数量越多但误匹配也越多。<br>"
+            "建议：SuperPoint 0.3~0.5，SIFT/SURF 0.5~0.7，ORB 0.6~0.8</td></tr>"
+            "<tr><td><b>置信度阈值</b></td>"
+            "<td>范围 0~1，默认 0.2。控制图像对是否参与拼接的最低可信度。<br>"
+            "值越大，要求匹配质量越高，低质量图像对会被排除。<br>"
+            "建议：一般保持默认 0.1~0.3 即可</td></tr>"
+            "</table>"
+
+            "<h3 style='color:#2563eb;'>输出设置</h3>"
+            "<table cellpadding='6' cellspacing='0' style='width:100%;'>"
+            "<tr><td><b>输出文件夹</b></td><td>拼接结果保存目录，会根据算法参数自动生成</td></tr>"
+            "<tr><td><b>输出文件名</b></td><td>拼接结果的文件名，格式如 <code>sp_lg_pano_mt0.3_ct0.2.jpg</code></td></tr>"
+            "<tr><td><b>保存匹配图</b></td><td>勾选后会在输出目录保存每对图像的特征匹配可视化图（match_0_1.jpg）</td></tr>"
+            "</table>"
+
+            "<h3 style='color:#2563eb;'>输出命名规则</h3>"
+            "<p>文件夹和文件名自动按 <code>{检测器}_{匹配器}_{模式}_mt{匹配阈值}_ct{置信度}</code> 格式生成：</p>"
+            "<table cellpadding='4' cellspacing='0'>"
+            "<tr><td>sp</td><td>SuperPoint</td><td>sift</td><td>SIFT</td></tr>"
+            "<tr><td>orb</td><td>ORB</td><td>surf</td><td>SURF</td></tr>"
+            "<tr><td>lg</td><td>LightGlue</td><td>bf</td><td>BFMatcher</td></tr>"
+            "<tr><td>pano</td><td>Panorama</td><td>scan</td><td>Scans</td></tr>"
+            "</table>"
+        );
+    }
+
+    QPushButton* closeBtn = new QPushButton(m_isEnglish ? "Close" : "关闭", &dialog);
     closeBtn->setMinimumWidth(100);
     QHBoxLayout* btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
@@ -1103,13 +1269,147 @@ void MainWindow::on_paramGuide_triggered()
     dialog.exec();
 }
 
+void MainWindow::on_switchLanguage_triggered()
+{
+    m_isEnglish = !m_isEnglish;
+    retranslateUi();
+}
+
+void MainWindow::retranslateUi()
+{
+    if (m_isEnglish) {
+        setWindowTitle("PVStitch");
+
+        // Group boxes
+        ui->groupBox->setTitle("Image Settings");
+        ui->groupBox_3->setTitle("Stitching Parameters");
+        ui->groupBox_4->setTitle("Output Settings");
+        ui->groupBox_inputImages->setTitle("Input Images");
+        ui->groupBox_5->setTitle("Result Preview");
+
+        // Labels
+        ui->label->setText("Image Folder:");
+        ui->label_2->setText("Image Extension:");
+        ui->label_detector->setText("Feature Detector:");
+        ui->label_matcher->setText("Feature Matcher:");
+        ui->label_5->setText("Stitching Mode:");
+        ui->label_direction->setText("Stitching Direction:");
+        ui->label_6->setText("Match Threshold:");
+        ui->label_7->setText("Confidence Threshold:");
+        ui->label_8->setText("Output Folder:");
+        ui->label_9->setText("Output Filename:");
+
+        // Buttons
+        ui->pushButton_startStitching->setText("Start Stitching");
+        ui->pushButton_reset->setText("Reset");
+        ui->pushButton_browseImageDir->setText("Browse...");
+        ui->pushButton_browseOutputDir->setText("Browse...");
+
+        // Placeholders
+        ui->lineEdit_imageDir->setPlaceholderText("Select image folder");
+        ui->lineEdit_outputDir->setPlaceholderText("Select output folder");
+
+        // Checkboxes
+        ui->checkBox_divideImages->setText("Split image (divide each image into 3 parts)");
+        ui->checkBox_gpu->setText("LightGlue GPU acceleration (requires NVIDIA GPU)");
+        ui->checkBox_showMatching->setText("Save matching result images");
+
+        // Combo box items
+        ui->comboBox_mode->setItemText(0, "Panorama");
+        ui->comboBox_mode->setItemText(1, "Scans");
+        ui->comboBox_direction->setItemText(0, "Auto");
+        ui->comboBox_direction->setItemText(1, "Horizontal");
+        ui->comboBox_direction->setItemText(2, "Vertical");
+
+        // Menu items
+        ui->menu->setTitle("File");
+        ui->menu_settings->setTitle("Settings");
+        ui->menu_2->setTitle("Help");
+        ui->action_openImages->setText("Open Image Folder");
+        ui->action_exit->setText("Exit");
+        ui->action_about->setText("About");
+        ui->action_modelSettings->setText("Model Settings...");
+        m_exportLogAction->setText("Export Log...");
+        m_operationGuideAction->setText("Operation Guide");
+        m_errorGuideAction->setText("Error Guide");
+        m_paramGuideAction->setText("Parameter Guide");
+        m_langAction->setText("中文");
+
+        // Status bar
+        ui->statusbar->showMessage("Ready");
+        m_statusLabel->setText("● Ready");
+
+    } else {
+        setWindowTitle("PVStitch");
+
+        // Group boxes
+        ui->groupBox->setTitle("图像设置");
+        ui->groupBox_3->setTitle("拼接参数");
+        ui->groupBox_4->setTitle("输出设置");
+        ui->groupBox_inputImages->setTitle("待拼接图片");
+        ui->groupBox_5->setTitle("结果预览");
+
+        // Labels
+        ui->label->setText("图像文件夹：");
+        ui->label_2->setText("图像扩展名：");
+        ui->label_detector->setText("特征检测器：");
+        ui->label_matcher->setText("特征匹配器：");
+        ui->label_5->setText("拼接模式：");
+        ui->label_direction->setText("拼接方向：");
+        ui->label_6->setText("匹配阈值：");
+        ui->label_7->setText("拼接置信度阈值：");
+        ui->label_8->setText("输出文件夹：");
+        ui->label_9->setText("输出文件名：");
+
+        // Buttons
+        ui->pushButton_startStitching->setText("开始拼接");
+        ui->pushButton_reset->setText("重置任务");
+        ui->pushButton_browseImageDir->setText("浏览...");
+        ui->pushButton_browseOutputDir->setText("浏览...");
+
+        // Placeholders
+        ui->lineEdit_imageDir->setPlaceholderText("请选择待拼接图像文件夹");
+        ui->lineEdit_outputDir->setPlaceholderText("请选择输出文件夹");
+
+        // Checkboxes
+        ui->checkBox_divideImages->setText("分割图像（将每张图像分成三部分）");
+        ui->checkBox_gpu->setText("LightGlue使用GPU加速（需NVIDIA显卡）");
+        ui->checkBox_showMatching->setText("保存匹配结果图像");
+
+        // Combo box items
+        ui->comboBox_mode->setItemText(0, "Panorama（全景）");
+        ui->comboBox_mode->setItemText(1, "Scans（扫描）");
+        ui->comboBox_direction->setItemText(0, "自动");
+        ui->comboBox_direction->setItemText(1, "水平");
+        ui->comboBox_direction->setItemText(2, "垂直");
+
+        // Menu items
+        ui->menu->setTitle("文件");
+        ui->menu_settings->setTitle("设置");
+        ui->menu_2->setTitle("帮助");
+        ui->action_openImages->setText("打开图像文件夹");
+        ui->action_exit->setText("退出");
+        ui->action_about->setText("关于");
+        ui->action_modelSettings->setText("模型设置...");
+        m_exportLogAction->setText("导出日志...");
+        m_operationGuideAction->setText("操作指南");
+        m_errorGuideAction->setText("报错说明");
+        m_paramGuideAction->setText("参数说明");
+        m_langAction->setText("English");
+
+        // Status bar
+        ui->statusbar->showMessage("就绪");
+        m_statusLabel->setText("● 就绪");
+    }
+}
+
 void MainWindow::on_stitchingFinished()
 {
     updateUIState(false);
-    ui->statusbar->showMessage("拼接完成");
+    ui->statusbar->showMessage(m_isEnglish ? "Stitching complete" : "拼接完成");
     // 只有在没有错误发生时才显示任务完成消息
-    if (!ui->textEdit_log->toPlainText().contains("错误")) {
-        appendLog(QString("%1 拼接任务完成").arg(m_currentRunTag));
+    if (!ui->textEdit_log->toPlainText().contains(m_isEnglish ? "Error" : "错误")) {
+        appendLog(m_isEnglish ? QString("%1 Stitching task completed").arg(m_currentRunTag) : QString("%1 拼接任务完成").arg(m_currentRunTag));
     }
 }
 
@@ -1129,16 +1429,20 @@ void MainWindow::on_stitchingResult(const cv::Mat& result)
     setStatusIndicator(StateSuccess, elapsed);
     displayImage(result);
     generateReport(elapsed);
-    appendLog(QString("%1 拼接结果已显示，耗时 %2s").arg(m_currentRunTag).arg(elapsed, 0, 'f', 2));
+    appendLog(m_isEnglish
+        ? QString("%1 Stitching result displayed, elapsed %2s").arg(m_currentRunTag).arg(elapsed, 0, 'f', 2)
+        : QString("%1 拼接结果已显示，耗时 %2s").arg(m_currentRunTag).arg(elapsed, 0, 'f', 2));
 }
 
 void MainWindow::on_stitchingError(const QString& error)
 {
     double elapsed = m_elapsedTimer.elapsed() / 1000.0;
     setStatusIndicator(StateError, elapsed);
-    QMessageBox::critical(this, "错误", error);
-    appendLog(QString("%1 错误: %2，耗时 %3s").arg(m_currentRunTag, error).arg(elapsed, 0, 'f', 2));
-    ui->statusbar->showMessage("拼接失败，请检查参数和日志");
+    QMessageBox::critical(this, m_isEnglish ? "Error" : "错误", error);
+    appendLog(m_isEnglish
+        ? QString("%1 Error: %2, elapsed %3s").arg(m_currentRunTag, error).arg(elapsed, 0, 'f', 2)
+        : QString("%1 错误: %2，耗时 %3s").arg(m_currentRunTag, error).arg(elapsed, 0, 'f', 2));
+    ui->statusbar->showMessage(m_isEnglish ? "Stitching failed, please check parameters and log" : "拼接失败，请检查参数和日志");
     updateUIState(false);
 }
 
@@ -1258,13 +1562,17 @@ void MainWindow::setStatusIndicator(StitchState state, double elapsedSec)
     QString text, bg, border, color;
     switch (state) {
     case StateReady:
-        text = "● 就绪";   bg = "#eafaf1"; border = "#27ae60"; color = "#27ae60"; break;
+        text = m_isEnglish ? "● Ready" : "● 就绪";
+        bg = "#eafaf1"; border = "#27ae60"; color = "#27ae60"; break;
     case StateProcessing:
-        text = "● 拼接中"; bg = "#fef9e7"; border = "#f39c12"; color = "#f39c12"; break;
+        text = m_isEnglish ? "● Processing" : "● 拼接中";
+        bg = "#fef9e7"; border = "#f39c12"; color = "#f39c12"; break;
     case StateSuccess:
-        text = "● 完成";   bg = "#eafaf1"; border = "#27ae60"; color = "#27ae60"; break;
+        text = m_isEnglish ? "● Done" : "● 完成";
+        bg = "#eafaf1"; border = "#27ae60"; color = "#27ae60"; break;
     case StateError:
-        text = "● 失败";   bg = "#fdedec"; border = "#e74c3c"; color = "#e74c3c"; break;
+        text = m_isEnglish ? "● Failed" : "● 失败";
+        bg = "#fdedec"; border = "#e74c3c"; color = "#e74c3c"; break;
     }
     m_statusLabel->setText(text);
     m_statusLabel->setStyleSheet(
@@ -1273,9 +1581,11 @@ void MainWindow::setStatusIndicator(StitchState state, double elapsedSec)
         .arg(bg, border, color));
 
     if (m_lastElapsedSec >= 0 && state != StateProcessing)
-        m_timeLabel->setText(QString("⏱ 耗时 %1 s").arg(m_lastElapsedSec, 0, 'f', 2));
+        m_timeLabel->setText(m_isEnglish
+            ? QString("⏱ Elapsed %1 s").arg(m_lastElapsedSec, 0, 'f', 2)
+            : QString("⏱ 耗时 %1 s").arg(m_lastElapsedSec, 0, 'f', 2));
     else if (state == StateProcessing)
-        m_timeLabel->setText("⏱ 计时中...");
+        m_timeLabel->setText(m_isEnglish ? "⏱ Timing..." : "⏱ 计时中...");
     else
         m_timeLabel->setText("");
 }
@@ -1289,33 +1599,33 @@ void MainWindow::generateReport(double elapsedSec)
     QStringList directions = {"auto", "horiz", "vert"};
 
     QJsonObject input;
-    input["文件夹"] = ui->lineEdit_imageDir->text();
-    input["图片数量"] = ui->hLayout_inputImages->count() - 1;
+    input[m_isEnglish ? "folder" : "文件夹"] = ui->lineEdit_imageDir->text();
+    input[m_isEnglish ? "image_count" : "图片数量"] = ui->hLayout_inputImages->count() - 1;
 
     QJsonObject params;
-    params["特征检测器"] = detectors[ui->comboBox_detector->currentIndex()];
-    params["特征匹配器"] = matchers[ui->comboBox_matcher->currentIndex()];
-    params["拼接模式"] = modes[ui->comboBox_mode->currentIndex()];
-    params["拼接方向"] = directions[ui->comboBox_direction->currentIndex()];
-    params["匹配阈值"] = ui->doubleSpinBox_matchThreshold->value();
-    params["置信度阈值"] = ui->doubleSpinBox_confidenceThreshold->value();
-    params["保存匹配图"] = ui->checkBox_showMatching->isChecked();
+    params[m_isEnglish ? "feature_detector" : "特征检测器"] = detectors[ui->comboBox_detector->currentIndex()];
+    params[m_isEnglish ? "feature_matcher" : "特征匹配器"] = matchers[ui->comboBox_matcher->currentIndex()];
+    params[m_isEnglish ? "stitching_mode" : "拼接模式"] = modes[ui->comboBox_mode->currentIndex()];
+    params[m_isEnglish ? "stitching_direction" : "拼接方向"] = directions[ui->comboBox_direction->currentIndex()];
+    params[m_isEnglish ? "match_threshold" : "匹配阈值"] = ui->doubleSpinBox_matchThreshold->value();
+    params[m_isEnglish ? "confidence_threshold" : "置信度阈值"] = ui->doubleSpinBox_confidenceThreshold->value();
+    params[m_isEnglish ? "save_matching_images" : "保存匹配图"] = ui->checkBox_showMatching->isChecked();
 
     QJsonObject output;
-    output["文件夹"] = ui->lineEdit_outputDir->text();
-    output["结果文件"] = ui->lineEdit_outputName->text();
+    output[m_isEnglish ? "folder" : "文件夹"] = ui->lineEdit_outputDir->text();
+    output[m_isEnglish ? "result_file" : "结果文件"] = ui->lineEdit_outputName->text();
 
     QJsonObject result;
-    result["状态"] = "成功";
-    result["耗时_秒"] = elapsedSec;
+    result[m_isEnglish ? "status" : "状态"] = m_isEnglish ? "Success" : "成功";
+    result[m_isEnglish ? "elapsed_seconds" : "耗时_秒"] = elapsedSec;
 
     QJsonObject report;
-    report["拼接报告"] = "SuperStitch 自动生成";
-    report["生成时间"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
-    report["输入"] = input;
-    report["算法参数"] = params;
-    report["输出"] = output;
-    report["结果"] = result;
+    report[m_isEnglish ? "stitching_report" : "拼接报告"] = m_isEnglish ? "PVStitch auto-generated" : "SuperStitch 自动生成";
+    report[m_isEnglish ? "generated_at" : "生成时间"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+    report[m_isEnglish ? "input" : "输入"] = input;
+    report[m_isEnglish ? "algorithm_parameters" : "算法参数"] = params;
+    report[m_isEnglish ? "output" : "输出"] = output;
+    report[m_isEnglish ? "result" : "结果"] = result;
 
     QString tag = buildOutputTag();
     QString baseDir = ui->lineEdit_imageDir->text();
@@ -1326,9 +1636,9 @@ void MainWindow::generateReport(double elapsedSec)
         QJsonDocument doc(report);
         file.write(doc.toJson(QJsonDocument::Indented));
         file.close();
-        appendLog("拼接报告已保存: " + reportPath);
+        appendLog(m_isEnglish ? "Stitching report saved: " + reportPath : "拼接报告已保存: " + reportPath);
     } else {
-        appendLog("警告: 无法保存拼接报告: " + reportPath);
+        appendLog(m_isEnglish ? "Warning: Cannot save stitching report: " + reportPath : "警告: 无法保存拼接报告: " + reportPath);
     }
 }
 
@@ -1441,7 +1751,7 @@ void MainWindow::appendLog(const QString& message)
 bool MainWindow::validateParameters()
 {
     if (ui->lineEdit_imageDir->text().isEmpty()) {
-        QMessageBox::warning(this, "警告", "请选择图像文件夹！");
+        QMessageBox::warning(this, m_isEnglish ? "Warning" : "警告", m_isEnglish ? "Please select an image folder!" : "请选择图像文件夹！");
         return false;
     }
 
@@ -1450,23 +1760,23 @@ bool MainWindow::validateParameters()
 
     // SuperPoint 检测器需要模型路径
     if (isSuperPoint && m_superPointPath.isEmpty()) {
-        QMessageBox::warning(this, "警告", "请在 设置→模型设置 中配置SuperPoint模型文件！");
+        QMessageBox::warning(this, m_isEnglish ? "Warning" : "警告", m_isEnglish ? "Please configure the SuperPoint model file in Settings -> Model Settings!" : "请在 设置→模型设置 中配置SuperPoint模型文件！");
         return false;
     }
 
     // LightGlue 匹配器需要模型路径
     if (isLightGlue && m_lightGluePath.isEmpty()) {
-        QMessageBox::warning(this, "警告", "请在 设置→模型设置 中配置LightGlue模型文件！");
+        QMessageBox::warning(this, m_isEnglish ? "Warning" : "警告", m_isEnglish ? "Please configure the LightGlue model file in Settings -> Model Settings!" : "请在 设置→模型设置 中配置LightGlue模型文件！");
         return false;
     }
 
     if (ui->lineEdit_outputDir->text().isEmpty()) {
-        QMessageBox::warning(this, "警告", "请选择输出文件夹！");
+        QMessageBox::warning(this, m_isEnglish ? "Warning" : "警告", m_isEnglish ? "Please select an output folder!" : "请选择输出文件夹！");
         return false;
     }
 
     if (ui->lineEdit_outputName->text().isEmpty()) {
-        QMessageBox::warning(this, "警告", "请输入输出文件名！");
+        QMessageBox::warning(this, m_isEnglish ? "Warning" : "警告", m_isEnglish ? "Please enter an output filename!" : "请输入输出文件名！");
         return false;
     }
 
