@@ -45,6 +45,7 @@ desktop.ini
 
 # ========== Claude Code ==========
 .claude/
+CLAUDE.md
 
 # ========== Qt Creator 杂项 ==========
 *.autosave

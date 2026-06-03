@@ -97,7 +97,7 @@
 
 ### 输出命名规则
 
-输出文件夹和文件名按 `{检测器}_{匹配器}_{模式}_mt{匹配阈值}_ct{置信度}` 格式自动生成，例如 `sp_lg_pano_mt0.3_ct0.5`。缩写对照：
+输出文件夹和文件名按 `{检测器}_{匹配器}_{模式}_mt{匹配阈值}_ct{置信度}` 格式自动生成，例如 `sp_lg_pano_mt0.6_ct0.2`。缩写对照：
 
 | 缩写 | 含义 | 缩写 | 含义 |
 |------|------|------|------|
@@ -139,10 +139,13 @@ sp_lg_pano_mt0.3_ct0.5/
 - **cv::Mat 跨线程安全**：`StitchingWorker` 的 `resultReady` 信号不传 `cv::Mat` 参数，结果存储在 Worker 的 `m_lastResult` 成员变量中，主线程通过 `lastResult()` getter 读取。避免 queued connection 中 cv::Mat 拷贝导致的堆损坏
 - **Worker 生命周期**：不在 `finished` 信号中 `deleteLater`，延迟到下一次拼接开始时清理，确保 queued 信号在 worker 销毁前被处理
 - **置信度钳位已删除**：`confidence > 3 ? 0 : confidence` 这行已移除（LightGlue 和 ClassicalMatcher 中）。该逻辑在匹配质量极好时会错误地将置信度归零
-- **matchThreshold 默认值**：从 0.6 改为 0.3（mainwindow.ui）
-- **Qt 消息处理器**：`pvMessageHandler` 将 `qDebug()/qWarning()` 重定向到日志窗口（textEdit_log），安装在 MainWindow 构造函数中
-- **匹配诊断日志**：LightGlue 和 ClassicalMatcher 在 ratio test 后、Homography 前、置信度计算后输出匹配数/内点数/置信度
-- **匹配器 clearCache()**：`stitch()` 完成后调用 `clearCache()` 释放 `features_` 和 `pairwise_matches_` 缓存
+- **matchThreshold 默认值**：0.6（mainwindow.ui）
+- **Qt 消息处理器**：`pvMessageHandler` 将 `qDebug()/qWarning()` 重定向到日志窗口。线程安全设计：所有线程的 qDebug 输出写入 static QMutex 保护的 `QStringList` 缓冲队列，GUI 线程 QTimer（200ms 间隔）调用 `flushPendingLogs()` 批量刷新到 `textEdit_log`。**不写 stderr**——避免无缓冲 I/O 拖慢拼接性能
+- **匹配诊断日志**：LightGlue 和 ClassicalMatcher 在 ratio test 后、Homography 前、置信度计算后通过 `qDebug()` 输出匹配数/内点数/置信度
+- **匹配器 clearCache()**：**必须在匹配图保存之后调用**（`stitch()` 返回后立刻 clearCache 会导致匹配图无法保存，因为 features/matchinfo 已被清空）。清除时机：`stitch()` 成功 → 保存结果图 → 如需保存匹配图则先读 matcher 数据并生成 match_X_Y.jpg → 最后 clearCache
+- **Homography 坐标系**：全景模式使用**原始图像坐标**（不中心化），`cv::Stitcher` 内部的 focal length 分解和 Bundle Adjustment 期望此坐标系。关键点坐标直接传入 `findHomography()`，不减去半宽高
+- **控制台编码**：`main.cpp` 中 `SetConsoleOutputCP(65001)` 设置控制台代码页为 UTF-8，解决中文输出乱码
+- **调试输出优化**：`readImages()` 已移除逐文件 `std::cout` 调试输出；`lightglue.cpp` 已移除每对匹配的 Homography 矩阵 `std::cout`。错误路径保留（"Can't read image" 等）
 - **CUDA/cuDNN DLL 自动复制**：`.pro` 从 `$(CUDA_PATH)/bin/` 复制 `cudart64_*.dll`、`cublas64_*.dll`、`cublasLt64_*.dll`；自动检测 cuDNN 安装路径复制 `cudnn*.dll`
 
 ## 待解决问题
