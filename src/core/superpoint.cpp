@@ -5,11 +5,10 @@
 
 #include <opencv2/opencv.hpp>
 #include <map>
+#include <memory>
 #include <onnxruntime_cxx_api.h>
 
 #include "superpoint.h"
-
-
 
 SuperPoint::SuperPoint(std::wstring modelPath)
 {
@@ -41,20 +40,19 @@ void SuperPoint::detectAndCompute(
 	cv::OutputArray descriptors,
 	bool useProvidedKeypoints)
 {
+	// 懒初始化 session（首次调用时创建，之后复用）
+	static std::map<std::wstring, std::shared_ptr<Ort::Session>> sessions;
 	static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "SuperPoint");
-	static Ort::SessionOptions sessionOptions;
-	static std::map<std::wstring, Ort::Session*> sessions;
-	
-	if (sessions.find(this->mModelPath) == sessions.end())
-	{
-		sessionOptions.SetIntraOpNumThreads(1);
-		sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-		
-		// 在 Windows 上直接使用宽字符路径，避免编码转换导致的乱码问题
-		sessions[this->mModelPath] = new Ort::Session(env, this->mModelPath.c_str(), sessionOptions);
+	auto it = sessions.find(this->mModelPath);
+	if (it == sessions.end()) {
+		Ort::SessionOptions opts;
+		opts.SetIntraOpNumThreads(1);
+		opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+		auto sp = std::make_shared<Ort::Session>(env, this->mModelPath.c_str(), opts);
+		sessions[this->mModelPath] = sp;
+		it = sessions.find(this->mModelPath);
 	}
-
-	Ort::Session* extractorSession = sessions[this->mModelPath];
+	Ort::Session* extractorSession = it->second.get();
 
 	cv::Mat img = image.getMat();
 	cv::Mat grayImg;
@@ -108,20 +106,18 @@ void SuperPoint::detect(
 	std::vector<cv::KeyPoint>& keypoints,
 	cv::InputArray mask)
 {
+	static std::map<std::wstring, std::shared_ptr<Ort::Session>> sessions;
 	static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "SuperPoint");
-	static Ort::SessionOptions sessionOptions;
-	static std::map<std::wstring, Ort::Session*> sessions;
-	
-	if (sessions.find(this->mModelPath) == sessions.end())
-	{
-		sessionOptions.SetIntraOpNumThreads(1);
-		sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-		
-		// 在 Windows 上直接使用宽字符路径，避免编码转换导致的乱码问题
-		sessions[this->mModelPath] = new Ort::Session(env, this->mModelPath.c_str(), sessionOptions);
+	auto it = sessions.find(this->mModelPath);
+	if (it == sessions.end()) {
+		Ort::SessionOptions opts;
+		opts.SetIntraOpNumThreads(1);
+		opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+		auto sp = std::make_shared<Ort::Session>(env, this->mModelPath.c_str(), opts);
+		sessions[this->mModelPath] = sp;
+		it = sessions.find(this->mModelPath);
 	}
-
-	Ort::Session* extractorSession = sessions[this->mModelPath];
+	Ort::Session* extractorSession = it->second.get();
 
 	cv::Mat img = image.getMat();
 	cv::Mat grayImg;
@@ -164,20 +160,18 @@ void SuperPoint::compute(
 	std::vector<cv::KeyPoint>& keypoints,
 	cv::OutputArray descriptors)
 {
+	static std::map<std::wstring, std::shared_ptr<Ort::Session>> sessions;
 	static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "SuperPoint");
-	static Ort::SessionOptions sessionOptions;
-	static std::map<std::wstring, Ort::Session*> sessions;
-	
-	if (sessions.find(this->mModelPath) == sessions.end())
-	{
-		sessionOptions.SetIntraOpNumThreads(1);
-		sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-		
-		// 在 Windows 上直接使用宽字符路径，避免编码转换导致的乱码问题
-		sessions[this->mModelPath] = new Ort::Session(env, this->mModelPath.c_str(), sessionOptions);
+	auto it = sessions.find(this->mModelPath);
+	if (it == sessions.end()) {
+		Ort::SessionOptions opts;
+		opts.SetIntraOpNumThreads(1);
+		opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+		auto sp = std::make_shared<Ort::Session>(env, this->mModelPath.c_str(), opts);
+		sessions[this->mModelPath] = sp;
+		it = sessions.find(this->mModelPath);
 	}
-
-	Ort::Session* extractorSession = sessions[this->mModelPath];
+	Ort::Session* extractorSession = it->second.get();
 
 	cv::Mat img = image.getMat();
 	cv::Mat grayImg;

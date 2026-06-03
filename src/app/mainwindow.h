@@ -57,7 +57,7 @@ signals:
     void finished();
     void progressChanged(int value);
     void logMessage(const QString& message);
-    void resultReady(const cv::Mat& result);
+    void resultReady();
     void errorOccurred(const QString& error);
 
 private:
@@ -78,6 +78,10 @@ private:
     bool m_useGpu;
     bool m_isEnglish;
     bool m_stopRequested;
+    cv::Mat m_lastResult;
+
+public:
+    const cv::Mat& lastResult() const { return m_lastResult; }
     QMutex m_mutex;
 
     cv::Ptr<cv::Feature2D> createDetector();
@@ -113,7 +117,7 @@ private slots:
     void on_stitchingFinished();
     void on_stitchingProgress(int value);
     void on_stitchingLog(const QString& message);
-    void on_stitchingResult(const cv::Mat& result);
+    void on_stitchingResult();
     void on_stitchingError(const QString& error);
 
 private:
@@ -132,6 +136,7 @@ private:
     bool m_isEnglish = false;
     void displayImage(const cv::Mat& image);
     void appendLog(const QString& message);
+    void flushPendingLogs();
     bool validateParameters();
 
     // 输入图片预览

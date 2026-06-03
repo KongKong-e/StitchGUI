@@ -122,6 +122,24 @@ win32 {
         QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$${CUDNN_SRC}\\cudnn*.dll\" \"$${DESTDIR_WIN}\\\" &)
     }
 
+    # Copy CUDA runtime DLLs from CUDA Toolkit (auto-detect via CUDA_PATH)
+    CUDA_PATH = $$(CUDA_PATH)
+    !isEmpty(CUDA_PATH) {
+        CUDA_PATH ~= s,/,\\,g
+        CUDA_BIN = $$CUDA_PATH\\bin
+        exists($$CUDA_BIN) {
+            QMAKE_POST_LINK += $$quote(cmd /c for /f \"tokens=*\" %%i in ('dir /b /a-d \"$$CUDA_BIN\\cudart64_*.dll\"') do copy /y \"$$CUDA_BIN\\%%i\" \"$$DESTDIR_WIN\\\" &)
+            QMAKE_POST_LINK += $$quote(cmd /c for /f \"tokens=*\" %%i in ('dir /b /a-d \"$$CUDA_BIN\\cublas64_*.dll\"') do copy /y \"$$CUDA_BIN\\%%i\" \"$$DESTDIR_WIN\\\" &)
+            QMAKE_POST_LINK += $$quote(cmd /c for /f \"tokens=*\" %%i in ('dir /b /a-d \"$$CUDA_BIN\\cublasLt64_*.dll\"') do copy /y \"$$CUDA_BIN\\%%i\" \"$$DESTDIR_WIN\\\" &)
+        }
+        # Copy cuDNN DLLs from NVIDIA cuDNN install path
+        CUDNN_INSTALL = C:\\Program Files\\NVIDIA\\CUDNN\\v9.23\\bin\\12.9\\x64
+        exists($$CUDNN_INSTALL) {
+            CUDNN_INSTALL ~= s,/,\\,g
+            QMAKE_POST_LINK += $$quote(cmd /c copy /y \"$$CUDNN_INSTALL\\cudnn*.dll\" \"$$DESTDIR_WIN\\\" &)
+        }
+    }
+
     # Copy model directory to build output
     MODEL_SRC = $$PWD/model
     MODEL_SRC ~= s,/,\\,g

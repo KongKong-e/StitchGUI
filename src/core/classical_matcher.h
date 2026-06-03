@@ -41,4 +41,12 @@ public:
     {
         return pairwise_matches_;
     }
+
+    void clearCache()
+    {
+        features_.clear();
+        features_.shrink_to_fit();
+        pairwise_matches_.clear();
+        pairwise_matches_.shrink_to_fit();
+    }
 };

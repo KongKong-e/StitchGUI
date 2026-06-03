@@ -21,18 +21,9 @@ std::vector<cv::Mat> SUPERSTITCH_EXPORTS readImages(
 	std::string dir, std::string ext, bool isDivide /*= false*/)
 {
 
-	std::cout << "[DEBUG] 读取图像：" << std::endl;
-	std::cout << "[DEBUG] 目录：" << dir << std::endl;
-	std::cout << "[DEBUG] 扩展名：" << ext << std::endl;
-
 	std::vector<std::string> fileNames;
 
 	libpano::get_filenames_with_absolute_path(dir, fileNames, ext);
-
-	std::cout << "[DEBUG] 找到 " << fileNames.size() << " 个文件" << std::endl;
-	for (size_t i = 0; i < fileNames.size(); i++) {
-		std::cout << "[DEBUG] 文件 " << i << ": " << fileNames[i] << std::endl;
-	}
 
 	std::vector<cv::Mat> imgs;
 
@@ -72,8 +63,6 @@ std::vector<cv::Mat> SUPERSTITCH_EXPORTS readImages(
 		}
 
 	}
-
-	std::cout << "[DEBUG] 成功读取 " << imgs.size() << " 张图像" << std::endl;
 
 	return imgs;
 }

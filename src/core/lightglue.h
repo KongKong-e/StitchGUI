@@ -65,6 +65,14 @@ public:
 		return pairwise_matches_;
 	};
 
+	void clearCache()
+	{
+		features_.clear();
+		features_.shrink_to_fit();
+		pairwise_matches_.clear();
+		pairwise_matches_.shrink_to_fit();
+	};
+
 	// 实际是否使用 GPU（session 创建后才准确）
 	bool isUsingGpu() const { return m_gpuActive; }
 

@@ -31,7 +31,7 @@ void LightGlue::match(
 	MatchesInfo& matches_info)
 {
 	static Ort::Env env(ORT_LOGGING_LEVEL_FATAL, "LightGlue");
-	static std::map<std::wstring, Ort::Session*> sessions;
+	static std::map<std::wstring, std::shared_ptr<Ort::Session>> sessions;
 
 	// 缓存 key 区分 GPU/CPU，避免混用
 	std::wstring gpuKey = this->m_modelPath + L"_gpu";
@@ -53,22 +53,24 @@ void LightGlue::match(
 				cudaOptions.device_id = 0;
 				gpuOptions.AppendExecutionProvider_CUDA(cudaOptions);
 
-				sessions[gpuKey] = new Ort::Session(env, this->m_modelPath.c_str(), gpuOptions);
+				auto session = std::make_shared<Ort::Session>(env, this->m_modelPath.c_str(), gpuOptions);
+				sessions[gpuKey] = session;
 				this->m_gpuActive = true;
 				qWarning("LightGlue: GPU (CUDA) session 创建成功");
 			}
-			catch (...) {
+			catch (const std::exception& e) {
 				// GPU session 创建失败，回退到 CPU
 				this->m_useGpu = false;
 				this->m_gpuActive = false;
-				qWarning("LightGlue: GPU 不可用，回退到 CPU 推理");
+				qWarning("LightGlue: GPU 不可用 (%s)，回退到 CPU 推理", e.what());
 
 				Ort::SessionOptions cpuOptions;
 				cpuOptions.SetIntraOpNumThreads(4);
 				cpuOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
-				sessions[cpuKey] = new Ort::Session(env, this->m_modelPath.c_str(), cpuOptions);
-				sessions[gpuKey] = sessions[cpuKey];  // GPU key 也指向 CPU session
+				auto session = std::make_shared<Ort::Session>(env, this->m_modelPath.c_str(), cpuOptions);
+				sessions[cpuKey] = session;
+				sessions[gpuKey] = session;  // GPU key 也指向 CPU session
 			}
 #else
 			// CUDA SDK 未安装，直接使用 CPU
@@ -80,8 +82,9 @@ void LightGlue::match(
 			sessionOptions.SetIntraOpNumThreads(4);
 			sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
-			sessions[cpuKey] = new Ort::Session(env, this->m_modelPath.c_str(), sessionOptions);
-			sessions[gpuKey] = sessions[cpuKey];  // GPU key 也指向 CPU session
+			auto session = std::make_shared<Ort::Session>(env, this->m_modelPath.c_str(), sessionOptions);
+			sessions[cpuKey] = session;
+			sessions[gpuKey] = session;  // GPU key 也指向 CPU session
 #endif
 		}
 		else
@@ -91,11 +94,11 @@ void LightGlue::match(
 			sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
 			// 在 Windows 上直接使用宽字符路径，避免编码转换导致的乱码问题
-			sessions[cacheKey] = new Ort::Session(env, this->m_modelPath.c_str(), sessionOptions);
+			sessions[cacheKey] = std::make_shared<Ort::Session>(env, this->m_modelPath.c_str(), sessionOptions);
 			this->m_gpuActive = false;
 		}
 	}
-	Ort::Session* lightglueSession = sessions[cacheKey];
+	Ort::Session* lightglueSession = sessions[cacheKey].get();
 
 	// 归一化关键点坐标
 	int n1 = static_cast<int>(features1.keypoints.size());
@@ -200,7 +203,7 @@ void LightGlue::match(
 		}
 	}
 
-	std::cout << "matches count:" << matches_info.matches.size() << std::endl;
+	qDebug("LightGlue: [%d vs %d] 匹配数: %d", features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
 
 	cv::Mat src_points(1, static_cast<int>(matches_info.matches.size()), CV_32FC2);
 	cv::Mat dst_points(1, static_cast<int>(matches_info.matches.size()), CV_32FC2);
@@ -239,22 +242,18 @@ void LightGlue::match(
 	}
 	else if (this->m_mode == cv::Stitcher::PANORAMA)
 	{
-		if (matches_info.matches.size() < 4)
+		if (matches_info.matches.size() < 4) {
+			qDebug("LightGlue: [%d vs %d] 匹配数不足: %d < 4, 跳过 Homography",
+				features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
 			return;
+		}
 
+		// 使用原始图像坐标（不中心化），cv::Stitcher 期望 Homography 在原始坐标系下
 		for (size_t i = 0; i < matches_info.matches.size(); ++i)
 		{
 			const cv::DMatch& m = matches_info.matches[i];
-
-			cv::Point2f p = features1.keypoints[m.queryIdx].pt;
-			p.x -= features1.img_size.width * 0.5f;
-			p.y -= features1.img_size.height * 0.5f;
-			src_points.at<cv::Point2f>(0, static_cast<int>(i)) = p;
-
-			p = features2.keypoints[m.trainIdx].pt;
-			p.x -= features2.img_size.width * 0.5f;
-			p.y -= features2.img_size.height * 0.5f;
-			dst_points.at<cv::Point2f>(0, static_cast<int>(i)) = p;
+			src_points.at<cv::Point2f>(0, static_cast<int>(i)) = features1.keypoints[m.queryIdx].pt;
+			dst_points.at<cv::Point2f>(0, static_cast<int>(i)) = features2.keypoints[m.trainIdx].pt;
 		}
 
 		matches_info.H = cv::findHomography(src_points, dst_points, matches_info.inliers_mask, cv::RANSAC);
@@ -274,13 +273,15 @@ void LightGlue::match(
 
 		matches_info.confidence = matches_info.num_inliers / (8 + 0.3 * matches_info.matches.size());
 
-		matches_info.confidence = matches_info.confidence > 3. ? 0. : matches_info.confidence;
+		qDebug("LightGlue: [%d vs %d] 内点: %d, 置信度: %.3f", features1.img_idx, features2.img_idx,
+			matches_info.num_inliers, matches_info.confidence);
 
 		if (matches_info.num_inliers < 6)
 		{
 			return;
 		}
 
+		// 二次 RANSAC 精炼（仅用内点重估，原始坐标）
 		src_points.create(1, matches_info.num_inliers, CV_32FC2);
 		dst_points.create(1, matches_info.num_inliers, CV_32FC2);
 		int inlier_idx = 0;
@@ -292,24 +293,13 @@ void LightGlue::match(
 			}
 
 			const cv::DMatch& m = matches_info.matches[i];
-
-			cv::Point2f p = features1.keypoints[m.queryIdx].pt;
-			p.x -= features1.img_size.width * 0.5f;
-			p.y -= features1.img_size.height * 0.5f;
-			src_points.at<cv::Point2f>(0, inlier_idx) = p;
-
-			p = features2.keypoints[m.trainIdx].pt;
-			p.x -= features2.img_size.width * 0.5f;
-			p.y -= features2.img_size.height * 0.5f;
-			dst_points.at<cv::Point2f>(0, inlier_idx) = p;
-
+			src_points.at<cv::Point2f>(0, inlier_idx) = features1.keypoints[m.queryIdx].pt;
+			dst_points.at<cv::Point2f>(0, inlier_idx) = features2.keypoints[m.trainIdx].pt;
 			inlier_idx++;
 		}
 
 		matches_info.H = cv::findHomography(src_points, dst_points, cv::RANSAC);
 	}
-
-	std::cout << matches_info.H << std::endl;
 
 	this->AddFeature(features1);
 

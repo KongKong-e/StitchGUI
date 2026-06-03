@@ -1,4 +1,4 @@
-# SuperStitchGUI
+# PVStitch
 
 光伏场景图像拼接桌面应用，基于 Qt 6 + OpenCV + ONNX Runtime。
 
@@ -69,14 +69,14 @@
 |--------|-----|-----------|-----------|
 | SuperPoint | `SuperPoint` | CV_32F, 256维 | LightGlue / ClassicalMatcher |
 | SIFT | `cv::SIFT` | CV_32F | ClassicalMatcher |
-| ORB | `cv::ORB` | CV_8U | ClassicalMatcher |
+| ORB | `cv::ORB` (1000特征点) | CV_8U | ClassicalMatcher |
 | SURF | `SurfDetector` | CV_32F | ClassicalMatcher |
 
 ### 特征匹配器（2 种，通过 `cv::detail::FeaturesMatcher` 接口统一）
 
 | 匹配器 | 类 | 说明 |
 |--------|-----|------|
-| LightGlue | `LightGlue` | 深度学习，仅配合 SuperPoint |
+| LightGlue | `LightGlue` | 深度学习，仅配合 SuperPoint，支持 GPU 加速（CUDA） |
 | BFMatcher | `ClassicalMatcher` | CV_8U→Hamming, CV_32F→L2, Lowe's ratio test |
 
 ### 线程模型
@@ -129,9 +129,22 @@ sp_lg_pano_mt0.3_ct0.5/
 - **模型文件在 .gitignore 中**，构建时通过 .pro 的 post-link 自动从 `model/` 复制到输出目录
 - **模型路径使用 `QCoreApplication::applicationDirPath()`**，自动适配构建/部署目录
 - **LightGlue ONNX 推理线程数**：`SetIntraOpNumThreads(4)`，sessionOptions 在 if 块内创建（非 static）
+- **LightGlue GPU 加速**：选择 LightGlue 时 UI 出现 GPU checkbox。`.pro` 用 `exists()` 自动检测 CUDA SDK，定义 `ONNX_CUDA_AVAILABLE` 宏。GPU session 创建失败自动 fallback 到 CPU。需要对方机器装 CUDA Toolkit 12.x，cuDNN 可随程序打包（`cudnn/` 目录）
+- **LightGlue 匹配数保护**：Panorama 路径在 `findHomography` 前检查匹配数 < 4，避免空矩阵崩溃
+- **ORB 特征点数**：`cv::ORB::create(1000)`，默认 500 改为 1000 提高匹配成功率
+- **中英文切换**：帮助菜单中可切换语言，`retranslateUi()` 刷新所有 UI 控件，Worker 日志也跟随语言设置
+- **帮助菜单**：操作指南、报错说明、参数说明三个对话框，均支持中英文
+- **输出命名**：改变算法参数时自动刷新，但点击"开始拼接"时不再覆盖用户手动修改的输出路径
+- **ONNX Session 内存管理**：LightGlue 和 SuperPoint 的 ONNX session 使用 `shared_ptr` 缓存在函数内 static map 中，避免内存泄漏。不要用文件级 static `Ort::Env`（会导致启动崩溃），必须用函数内 static
+- **cv::Mat 跨线程安全**：`StitchingWorker` 的 `resultReady` 信号不传 `cv::Mat` 参数，结果存储在 Worker 的 `m_lastResult` 成员变量中，主线程通过 `lastResult()` getter 读取。避免 queued connection 中 cv::Mat 拷贝导致的堆损坏
+- **Worker 生命周期**：不在 `finished` 信号中 `deleteLater`，延迟到下一次拼接开始时清理，确保 queued 信号在 worker 销毁前被处理
+- **置信度钳位已删除**：`confidence > 3 ? 0 : confidence` 这行已移除（LightGlue 和 ClassicalMatcher 中）。该逻辑在匹配质量极好时会错误地将置信度归零
+- **matchThreshold 默认值**：从 0.6 改为 0.3（mainwindow.ui）
+- **Qt 消息处理器**：`pvMessageHandler` 将 `qDebug()/qWarning()` 重定向到日志窗口（textEdit_log），安装在 MainWindow 构造函数中
+- **匹配诊断日志**：LightGlue 和 ClassicalMatcher 在 ratio test 后、Homography 前、置信度计算后输出匹配数/内点数/置信度
+- **匹配器 clearCache()**：`stitch()` 完成后调用 `clearCache()` 释放 `features_` 和 `pairwise_matches_` 缓存
+- **CUDA/cuDNN DLL 自动复制**：`.pro` 从 `$(CUDA_PATH)/bin/` 复制 `cudart64_*.dll`、`cublas64_*.dll`、`cublasLt64_*.dll`；自动检测 cuDNN 安装路径复制 `cudnn*.dll`
 
 ## 待解决问题
 
--GPU（装 CUDA Toolkit 12.x）
--批处理脚本
-
+-批处理脚本 

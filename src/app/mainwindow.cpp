@@ -24,6 +24,40 @@
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTimer>
+#include <cstdio>
+
+#include <QMutex>
+
+// 线程安全的 qDebug 消息缓冲队列 + 保护锁
+static QMutex s_logMutex;
+static QStringList s_pendingLogs;
+
+// Qt 消息处理器：将 qDebug/qWarning 重定向到日志窗口
+// 注意：此函数可以被任意线程调用（Worker、OpenMP 等），必须线程安全
+// 不写 stderr/stdout 以避免无缓冲 I/O 影响拼接性能
+static void pvMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg)
+{
+    // 附加到缓冲队列（线程安全：QMutex 保护）
+    QString ts = QDateTime::currentDateTime().toString("hh:mm:ss");
+    QString line = QString("[%1] %2").arg(ts, msg);
+    {
+        QMutexLocker locker(&s_logMutex);
+        s_pendingLogs.append(line);
+    }
+}
+
+// MainWindow 定时器回调：将缓冲的日志刷新到 UI（只能在 GUI 线程调用）
+void MainWindow::flushPendingLogs()
+{
+    QMutexLocker locker(&s_logMutex);
+    if (s_pendingLogs.isEmpty())
+        return;
+    for (const QString& line : s_pendingLogs) {
+        ui->textEdit_log->appendPlainText(line);
+    }
+    s_pendingLogs.clear();
+}
 
 StitchingWorker::StitchingWorker(QObject* parent)
     : QObject(parent)
@@ -162,9 +196,18 @@ void StitchingWorker::process()
         stitcher->setFeaturesMatcher(matcher);
         stitcher->setWaveCorrectKind(static_cast<cv::detail::WaveCorrectKind>(m_waveCorrectKind));
 
-        emit logMessage(m_isEnglish ? "Stitching in progress..." : "正在执行...");
+        emit logMessage(m_isEnglish
+            ? "Stitching in progress (matching → camera estimation → compositing)..."
+            : "正在执行 (特征匹配→相机估计→合成融合)...");
+        emit progressChanged(60);
         cv::Mat pano;
+        QElapsedTimer stitchTimer;
+        stitchTimer.start();
         cv::Stitcher::Status status = stitcher->stitch(imgs, pano);
+        double stitchElapsed = stitchTimer.elapsed() / 1000.0;
+        emit logMessage(m_isEnglish
+            ? QString("Stitching pipeline finished in %1s (detection + matching + compositing)").arg(stitchElapsed, 0, 'f', 1)
+            : QString("拼接流水线完成，耗时 %1s (检测+匹配+合成融合)").arg(stitchElapsed, 0, 'f', 1));
 
         if (m_matcher == "lightglue") {
             LightGlue* lg = dynamic_cast<LightGlue*>(matcher.get());
@@ -252,8 +295,17 @@ void StitchingWorker::process()
                 }
             }
 
+            // 匹配图保存完成后，释放匹配器缓存的内存
+            {
+                LightGlue* lg = dynamic_cast<LightGlue*>(matcher.get());
+                ClassicalMatcher* cm = dynamic_cast<ClassicalMatcher*>(matcher.get());
+                if (lg) lg->clearCache();
+                if (cm) cm->clearCache();
+            }
+
             emit progressChanged(100);
-            emit resultReady(pano);
+            m_lastResult = pano;
+            emit resultReady();
         } else {
             QString errorMsg;
             switch (status) {
@@ -291,6 +343,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_worker(nullptr)
 {
     ui->setupUi(this);
+
+    // 安装 Qt 消息处理器，将 qDebug/qWarning 输出到日志窗口
+    qInstallMessageHandler(pvMessageHandler);
 
     setWindowTitle("PVStitch");
 
@@ -459,6 +514,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     initializeConnections();
 
+    // 定时器：定期将线程安全缓冲区中的 qDebug 消息刷新到日志窗口
+    QTimer* logTimer = new QTimer(this);
+    connect(logTimer, &QTimer::timeout, this, &MainWindow::flushPendingLogs);
+    logTimer->start(200);  // 每 200ms 刷新一次
+
     // 设置菜单
     connect(ui->action_modelSettings, &QAction::triggered, this, &MainWindow::on_modelSettings_triggered);
 
@@ -589,6 +649,8 @@ MainWindow::~MainWindow()
         m_workerThread->quit();
         m_workerThread->wait();
     }
+    delete m_worker;
+    delete m_workerThread;
     delete ui;
 }
 
@@ -724,6 +786,13 @@ void MainWindow::on_startStitching_clicked()
         return;
     }
 
+    // 清理上一次拼接的 worker/thread（延迟清理，确保 queued 信号已处理）
+    if (m_workerThread) {
+        m_workerThread->deleteLater();
+        m_workerThread = nullptr;
+        m_worker = nullptr;
+    }
+
     updateUIState(true);
     ui->progressBar->setValue(0);
     m_elapsedTimer.start();
@@ -789,12 +858,8 @@ void MainWindow::on_startStitching_clicked()
     connect(m_worker, &StitchingWorker::resultReady, this, &MainWindow::on_stitchingResult);
     connect(m_worker, &StitchingWorker::errorOccurred, this, &MainWindow::on_stitchingError);
     connect(m_worker, &StitchingWorker::finished, m_workerThread, &QThread::quit);
-    connect(m_workerThread, &QThread::finished, m_workerThread, &QThread::deleteLater);
-    connect(m_workerThread, &QThread::finished, m_worker, &StitchingWorker::deleteLater);
-    connect(m_workerThread, &QThread::finished, this, [this]() {
-        m_workerThread = nullptr;
-        m_worker = nullptr;
-    });
+    // 不在 finished 时 deleteLater——延迟到下一次拼接时清理
+    // 避免 worker 在主处理完 queued resultReady 信号前被销毁导致堆损坏
 
     m_workerThread->start();
 }
@@ -882,7 +947,7 @@ void MainWindow::on_about_triggered()
             "PVStitch - Image Stitching Tool\n\n"
             "Supported feature detectors: SuperPoint, SIFT, ORB, SURF\n"
             "Supported matchers: LightGlue, BFMatcher\n"
-            "Version: 1.1\n\n"
+            "Version: 3.1\n\n"
             "Built with Qt 6.5.3 + OpenCV 4.10 + ONNX Runtime");
     } else {
         QMessageBox::about(this, "关于 StitchGUI",
@@ -1423,11 +1488,13 @@ void MainWindow::on_stitchingLog(const QString& message)
     appendLog(QString("%1 %2").arg(m_currentRunTag, message));
 }
 
-void MainWindow::on_stitchingResult(const cv::Mat& result)
+void MainWindow::on_stitchingResult()
 {
     double elapsed = m_elapsedTimer.elapsed() / 1000.0;
     setStatusIndicator(StateSuccess, elapsed);
-    displayImage(result);
+    // 从 worker 成员变量读取结果，避免 cv::Mat 跨线程传输
+    if (m_worker)
+        displayImage(m_worker->lastResult());
     generateReport(elapsed);
     appendLog(m_isEnglish
         ? QString("%1 Stitching result displayed, elapsed %2s").arg(m_currentRunTag).arg(elapsed, 0, 'f', 2)

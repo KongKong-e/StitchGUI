@@ -1,4 +1,5 @@
 #include "classical_matcher.h"
+#include <QDebug>
 
 ClassicalMatcher::ClassicalMatcher(cv::Stitcher::Mode mode, float matchThresh)
     : FeaturesMatcher(false)
@@ -48,8 +49,14 @@ void ClassicalMatcher::match(
         }
     }
 
-    if (matches_info.matches.size() < 6)
+    if (matches_info.matches.size() < 6) {
+        qDebug("BFMatcher: [%d vs %d] Ratio test 后匹配数不足: %d < 6, 跳过",
+            features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
         return;
+    }
+
+    qDebug("BFMatcher: [%d vs %d] Ratio test 后匹配数: %d",
+        features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
 
     // 估计几何变换（坐标需以图像中心为原点，同 LightGlue 做法）
     cv::Mat src_points(1, static_cast<int>(matches_info.matches.size()), CV_32FC2);
@@ -89,19 +96,12 @@ void ClassicalMatcher::match(
     }
     else if (m_mode == cv::Stitcher::PANORAMA)
     {
+        // 使用原始图像坐标（不中心化），cv::Stitcher 期望 Homography 在原始坐标系下
         for (size_t i = 0; i < matches_info.matches.size(); ++i)
         {
             const cv::DMatch& m = matches_info.matches[i];
-
-            cv::Point2f p = features1.keypoints[m.queryIdx].pt;
-            p.x -= features1.img_size.width * 0.5f;
-            p.y -= features1.img_size.height * 0.5f;
-            src_points.at<cv::Point2f>(0, static_cast<int>(i)) = p;
-
-            p = features2.keypoints[m.trainIdx].pt;
-            p.x -= features2.img_size.width * 0.5f;
-            p.y -= features2.img_size.height * 0.5f;
-            dst_points.at<cv::Point2f>(0, static_cast<int>(i)) = p;
+            src_points.at<cv::Point2f>(0, static_cast<int>(i)) = features1.keypoints[m.queryIdx].pt;
+            dst_points.at<cv::Point2f>(0, static_cast<int>(i)) = features2.keypoints[m.trainIdx].pt;
         }
 
         matches_info.H = cv::findHomography(src_points, dst_points, matches_info.inliers_mask, cv::RANSAC);
@@ -116,12 +116,15 @@ void ClassicalMatcher::match(
         }
 
         matches_info.confidence = matches_info.num_inliers / (8 + 0.3 * matches_info.matches.size());
-        matches_info.confidence = matches_info.confidence > 3. ? 0. : matches_info.confidence;
+
+        qDebug("BFMatcher: [%d vs %d] 匹配数: %d, 内点: %d, 置信度: %.3f",
+            features1.img_idx, features2.img_idx,
+            (int)matches_info.matches.size(), matches_info.num_inliers, matches_info.confidence);
 
         if (matches_info.num_inliers < 6)
             return;
 
-        // 二次 RANSAC 精炼（仅用内点重估）
+        // 二次 RANSAC 精炼（仅用内点重估，原始坐标）
         src_points.create(1, matches_info.num_inliers, CV_32FC2);
         dst_points.create(1, matches_info.num_inliers, CV_32FC2);
         int inlier_idx = 0;
@@ -131,17 +134,8 @@ void ClassicalMatcher::match(
                 continue;
 
             const cv::DMatch& m = matches_info.matches[i];
-
-            cv::Point2f p = features1.keypoints[m.queryIdx].pt;
-            p.x -= features1.img_size.width * 0.5f;
-            p.y -= features1.img_size.height * 0.5f;
-            src_points.at<cv::Point2f>(0, inlier_idx) = p;
-
-            p = features2.keypoints[m.trainIdx].pt;
-            p.x -= features2.img_size.width * 0.5f;
-            p.y -= features2.img_size.height * 0.5f;
-            dst_points.at<cv::Point2f>(0, inlier_idx) = p;
-
+            src_points.at<cv::Point2f>(0, inlier_idx) = features1.keypoints[m.queryIdx].pt;
+            dst_points.at<cv::Point2f>(0, inlier_idx) = features2.keypoints[m.trainIdx].pt;
             inlier_idx++;
         }
 
