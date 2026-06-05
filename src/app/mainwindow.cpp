@@ -1694,9 +1694,11 @@ void MainWindow::generateReport(double elapsedSec)
     report[m_isEnglish ? "output" : "输出"] = output;
     report[m_isEnglish ? "result" : "结果"] = result;
 
-    QString tag = buildOutputTag();
-    QString baseDir = ui->lineEdit_imageDir->text();
-    QString reportPath = baseDir + "/" + tag + "/" + tag + ".json";
+    // 报告与结果图保存在同一目录，同名但扩展名为 .json
+    QString outputDir = ui->lineEdit_outputDir->text();
+    QString outputName = ui->lineEdit_outputName->text();
+    QString baseName = QFileInfo(outputName).completeBaseName();  // 去掉 .jpg
+    QString reportPath = outputDir + "/" + baseName + ".json";
 
     QFile file(reportPath);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {

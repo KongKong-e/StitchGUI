@@ -32,6 +32,25 @@
 - `model/superpoint.onnx`
 - `model/superpoint_lightglue.onnx`
 
+## GPU 加速（可选）
+
+LightGlue 支持 CUDA GPU 加速。需要：
+
+| 组件 | 版本 | 获取 |
+|------|------|------|
+| CUDA Toolkit | 12.x | [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit-archive) |
+| cuDNN | 9.x | [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) |
+| ONNX Runtime GPU | 含 CUDA provider | 即 `onnxruntime_providers_cuda.dll` |
+
+安装步骤：
+
+1. 安装 CUDA Toolkit 12.x（`CUDA_PATH` 环境变量自动设置）
+2. 将 `cudnn*.dll` 放到项目 `cudnn/` 目录（或 CUDA 安装目录）
+3. 重新 qmake → 构建（`.pro` 自动检测 CUDA SDK 并启用）
+
+未检测到 CUDA 时自动回退 CPU 推理。
+
+
 ## 详细说明
 
 见 [CLAUDE.md](CLAUDE.md)。
