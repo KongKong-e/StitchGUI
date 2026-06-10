@@ -133,9 +133,9 @@ cv::Ptr<cv::Feature2D> StitchingWorker::createDetector()
 cv::Ptr<cv::detail::FeaturesMatcher> StitchingWorker::createMatcher()
 {
     if (m_matcher == "lightglue")
-        return cv::makePtr<LightGlue>(m_lightGluePath, m_mode, m_matchThreshold, m_useGpu);
+        return cv::makePtr<LightGlue>(m_lightGluePath, m_mode, m_matchThreshold, m_useGpu, m_isEnglish);
     else
-        return cv::makePtr<ClassicalMatcher>(m_mode, m_matchThreshold);
+        return cv::makePtr<ClassicalMatcher>(m_mode, m_matchThreshold, m_isEnglish);
 }
 
 void StitchingWorker::process()

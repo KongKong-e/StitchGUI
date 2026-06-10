@@ -141,7 +141,7 @@ sp_lg_pano_mt0.3_ct0.5/
 - **置信度钳位已删除**：`confidence > 3 ? 0 : confidence` 这行已移除（LightGlue 和 ClassicalMatcher 中）。该逻辑在匹配质量极好时会错误地将置信度归零
 - **matchThreshold 默认值**：0.6（mainwindow.ui）
 - **Qt 消息处理器**：`pvMessageHandler` 将 `qDebug()/qWarning()` 重定向到日志窗口。线程安全设计：所有线程的 qDebug 输出写入 static QMutex 保护的 `QStringList` 缓冲队列，GUI 线程 QTimer（200ms 间隔）调用 `flushPendingLogs()` 批量刷新到 `textEdit_log`。**不写 stderr**——避免无缓冲 I/O 拖慢拼接性能
-- **匹配诊断日志**：LightGlue 和 ClassicalMatcher 在 ratio test 后、Homography 前、置信度计算后通过 `qDebug()` 输出匹配数/内点数/置信度
+- **匹配诊断日志**：LightGlue 和 ClassicalMatcher 在 ratio test 后、Homography 前、置信度计算后通过 `qDebug()` 输出匹配数/内点数/置信度。消息支持中英文（`m_isEnglish` 通过构造函数传入 matcher）
 - **匹配器 clearCache()**：**必须在匹配图保存之后调用**（`stitch()` 返回后立刻 clearCache 会导致匹配图无法保存，因为 features/matchinfo 已被清空）。清除时机：`stitch()` 成功 → 保存结果图 → 如需保存匹配图则先读 matcher 数据并生成 match_X_Y.jpg → 最后 clearCache
 - **Homography 坐标系**：全景模式使用**原始图像坐标**（不中心化），`cv::Stitcher` 内部的 focal length 分解和 Bundle Adjustment 期望此坐标系。关键点坐标直接传入 `findHomography()`，不减去半宽高
 - **控制台编码**：`main.cpp` 中 `SetConsoleOutputCP(65001)` 设置控制台代码页为 UTF-8，解决中文输出乱码

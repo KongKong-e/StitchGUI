@@ -35,7 +35,7 @@ Makefile*
 *.vcxproj.user
 .qtc_clangd/
 
-# ========== cuDNN（需单独下载）==========
+# ========== 模型文件（需单独下载）==========
 cudnn/
 
 # ========== 系统文件 ==========
@@ -45,7 +45,10 @@ desktop.ini
 
 # ========== Claude Code ==========
 .claude/
-CLAUDE.md
+
+# ========== 实验数据和论文 ==========
+experientData/
+paper/
 
 # ========== Qt Creator 杂项 ==========
 *.autosave

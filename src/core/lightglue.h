@@ -29,6 +29,7 @@ protected:
 
 	bool m_useGpu = false;
 	bool m_gpuActive = false;
+	bool m_isEnglish = false;
 
 	CV_WRAP_AS(apply) void operator ()(
 		const ImageFeatures& features1,
@@ -47,7 +48,8 @@ public:
 		std::wstring modelPath,
 		cv::Stitcher::Mode mode,
 		float matchThresh,
-		bool useGpu = false);
+		bool useGpu = false,
+		bool isEnglish = false);
 
 	void match(
 		const ImageFeatures& features1,

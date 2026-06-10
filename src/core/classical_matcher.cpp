@@ -1,10 +1,11 @@
 #include "classical_matcher.h"
 #include <QDebug>
 
-ClassicalMatcher::ClassicalMatcher(cv::Stitcher::Mode mode, float matchThresh)
+ClassicalMatcher::ClassicalMatcher(cv::Stitcher::Mode mode, float matchThresh, bool isEnglish)
     : FeaturesMatcher(false)
     , m_mode(mode)
     , m_matchThresh(matchThresh)
+    , m_isEnglish(isEnglish)
 {
 }
 
@@ -50,12 +51,14 @@ void ClassicalMatcher::match(
     }
 
     if (matches_info.matches.size() < 6) {
-        qDebug("BFMatcher: [%d vs %d] Ratio test 后匹配数不足: %d < 6, 跳过",
+        qDebug(m_isEnglish ? "BFMatcher: [%d vs %d] Matches after ratio test: %d < 6, skipped"
+                           : "BFMatcher: [%d vs %d] Ratio test 后匹配数不足: %d < 6, 跳过",
             features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
         return;
     }
 
-    qDebug("BFMatcher: [%d vs %d] Ratio test 后匹配数: %d",
+    qDebug(m_isEnglish ? "BFMatcher: [%d vs %d] Matches after ratio test: %d"
+                       : "BFMatcher: [%d vs %d] Ratio test 后匹配数: %d",
         features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
 
     // 估计几何变换（坐标需以图像中心为原点，同 LightGlue 做法）
@@ -117,7 +120,8 @@ void ClassicalMatcher::match(
 
         matches_info.confidence = matches_info.num_inliers / (8 + 0.3 * matches_info.matches.size());
 
-        qDebug("BFMatcher: [%d vs %d] 匹配数: %d, 内点: %d, 置信度: %.3f",
+        qDebug(m_isEnglish ? "BFMatcher: [%d vs %d] matches: %d, inliers: %d, confidence: %.3f"
+                           : "BFMatcher: [%d vs %d] 匹配数: %d, 内点: %d, 置信度: %.3f",
             features1.img_idx, features2.img_idx,
             (int)matches_info.matches.size(), matches_info.num_inliers, matches_info.confidence);
 

@@ -9,6 +9,7 @@ class SUPERSTITCH_EXPORTS ClassicalMatcher : public cv::detail::FeaturesMatcher
 protected:
     cv::Stitcher::Mode m_mode;
     float m_matchThresh;
+    bool m_isEnglish;
 
     std::vector<cv::detail::ImageFeatures> features_;
     std::vector<cv::detail::MatchesInfo> pairwise_matches_;
@@ -25,7 +26,7 @@ protected:
     void AddMatcheinfo(const cv::detail::MatchesInfo& matches_info);
 
 public:
-    ClassicalMatcher(cv::Stitcher::Mode mode, float matchThresh);
+    ClassicalMatcher(cv::Stitcher::Mode mode, float matchThresh, bool isEnglish = false);
 
     void match(
         const cv::detail::ImageFeatures& features1,

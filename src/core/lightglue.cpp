@@ -15,11 +15,13 @@ LightGlue::LightGlue(
 	std::wstring modelPath,
 	cv::Stitcher::Mode mode,
 	float matchThresh,
-	bool useGpu)
+	bool useGpu,
+	bool isEnglish)
 {
 	this->m_matchThresh = matchThresh;
 	this->m_mode = mode;
 	this->m_useGpu = useGpu;
+	this->m_isEnglish = isEnglish;
 
 	this->m_modelPath = modelPath;
 }
@@ -56,13 +58,13 @@ void LightGlue::match(
 				auto session = std::make_shared<Ort::Session>(env, this->m_modelPath.c_str(), gpuOptions);
 				sessions[gpuKey] = session;
 				this->m_gpuActive = true;
-				qWarning("LightGlue: GPU (CUDA) session 创建成功");
+				qWarning("LightGlue: GPU (CUDA) session created");
 			}
 			catch (const std::exception& e) {
 				// GPU session 创建失败，回退到 CPU
 				this->m_useGpu = false;
 				this->m_gpuActive = false;
-				qWarning("LightGlue: GPU 不可用 (%s)，回退到 CPU 推理", e.what());
+				qWarning("LightGlue: GPU unavailable (%s), falling back to CPU", e.what());
 
 				Ort::SessionOptions cpuOptions;
 				cpuOptions.SetIntraOpNumThreads(4);
@@ -74,7 +76,7 @@ void LightGlue::match(
 			}
 #else
 			// CUDA SDK 未安装，直接使用 CPU
-			qWarning("LightGlue: 未检测到 CUDA SDK，使用 CPU 推理");
+			qWarning("LightGlue: CUDA SDK not found, using CPU");
 			this->m_useGpu = false;
 			this->m_gpuActive = false;
 
@@ -203,7 +205,9 @@ void LightGlue::match(
 		}
 	}
 
-	qDebug("LightGlue: [%d vs %d] 匹配数: %d", features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
+	qDebug(m_isEnglish ? "LightGlue: [%d vs %d] matches: %d"
+                      : "LightGlue: [%d vs %d] 匹配数: %d",
+		features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
 
 	cv::Mat src_points(1, static_cast<int>(matches_info.matches.size()), CV_32FC2);
 	cv::Mat dst_points(1, static_cast<int>(matches_info.matches.size()), CV_32FC2);
@@ -243,7 +247,8 @@ void LightGlue::match(
 	else if (this->m_mode == cv::Stitcher::PANORAMA)
 	{
 		if (matches_info.matches.size() < 4) {
-			qDebug("LightGlue: [%d vs %d] 匹配数不足: %d < 4, 跳过 Homography",
+			qDebug(m_isEnglish ? "LightGlue: [%d vs %d] insufficient matches: %d < 4, skipping Homography"
+                              : "LightGlue: [%d vs %d] 匹配数不足: %d < 4, 跳过 Homography",
 				features1.img_idx, features2.img_idx, (int)matches_info.matches.size());
 			return;
 		}
@@ -273,7 +278,9 @@ void LightGlue::match(
 
 		matches_info.confidence = matches_info.num_inliers / (8 + 0.3 * matches_info.matches.size());
 
-		qDebug("LightGlue: [%d vs %d] 内点: %d, 置信度: %.3f", features1.img_idx, features2.img_idx,
+		qDebug(m_isEnglish ? "LightGlue: [%d vs %d] inliers: %d, confidence: %.3f"
+                          : "LightGlue: [%d vs %d] 内点: %d, 置信度: %.3f",
+			features1.img_idx, features2.img_idx,
 			matches_info.num_inliers, matches_info.confidence);
 
 		if (matches_info.num_inliers < 6)
